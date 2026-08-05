@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from html import escape
 
 from aiogram import F, Router
@@ -195,6 +195,80 @@ async def build_statistics_text(
 
     return "\n".join(lines)
 
+
+@router.message(F.text == "😺 Сегодня")
+async def today_statistics_handler(
+    message: Message,
+    state: FSMContext,
+    is_admin: bool,
+) -> None:
+    await state.clear()
+
+    current_date = datetime.now(MOSCOW_TIMEZONE).date()
+
+    start_local = datetime.combine(
+        current_date,
+        time.min,
+        tzinfo=MOSCOW_TIMEZONE,
+    )
+    end_local = start_local + timedelta(days=1)
+
+    text = await build_statistics_text(
+        start_local=start_local,
+        end_local=end_local,
+        title="😺 <b>Сегодня</b>",
+        period_label=current_date.strftime("%d.%m.%Y"),
+    )
+
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=get_main_keyboard(is_admin),
+    )
+
+
+@router.message(F.text == "😸 Этот месяц")
+async def current_month_statistics_handler(
+    message: Message,
+    state: FSMContext,
+    is_admin: bool,
+) -> None:
+    await state.clear()
+
+    current_date = datetime.now(MOSCOW_TIMEZONE).date()
+    month_start = date(
+        year=current_date.year,
+        month=current_date.month,
+        day=1,
+    )
+    following_month_start = next_month_start(month_start)
+
+    start_local = datetime.combine(
+        month_start,
+        time.min,
+        tzinfo=MOSCOW_TIMEZONE,
+    )
+    end_local = datetime.combine(
+        following_month_start,
+        time.min,
+        tzinfo=MOSCOW_TIMEZONE,
+    )
+
+    text = await build_statistics_text(
+        start_local=start_local,
+        end_local=end_local,
+        title="😸 <b>Этот месяц</b>",
+        period_label=(
+            f"{MONTH_NAMES[current_date.month]} "
+            f"{current_date.year}"
+        ),
+    )
+
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=get_main_keyboard(is_admin),
+    )
 
 @router.message(F.text == "🐈‍⬛ Выбрать период")
 async def start_period_selection_handler(
