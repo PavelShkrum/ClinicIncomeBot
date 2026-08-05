@@ -1,5 +1,6 @@
 # ClinicIncomeBot
 
+[![Python checks](https://github.com/PavelShkrum/ClinicIncomeBot/actions/workflows/python-check.yml/badge.svg)](https://github.com/PavelShkrum/ClinicIncomeBot/actions/workflows/python-check.yml)
 Telegram-бот для учёта дохода от первичных и вторичных приёмов в нескольких поликлиниках.
 
 Бот не хранит имена пациентов, телефоны, диагнозы и другие медицинские или персональные данные. В базе сохраняются только поликлиника, тип приёма, сумма и дата.
