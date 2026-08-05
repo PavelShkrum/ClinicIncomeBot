@@ -19,10 +19,29 @@ async def init_db() -> None:
                 name TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 primary_price INTEGER NOT NULL CHECK(primary_price > 0),
                 secondary_price INTEGER NOT NULL CHECK(secondary_price > 0),
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                is_active INTEGER NOT NULL DEFAULT 1
+                    CHECK(is_active IN (0, 1))
             )
             """
         )
+
+        columns_cursor = await database.execute(
+            "PRAGMA table_info(clinics)"
+        )
+        clinic_columns = {
+            str(row[1])
+            for row in await columns_cursor.fetchall()
+        }
+
+        if "is_active" not in clinic_columns:
+            await database.execute(
+                """
+                ALTER TABLE clinics
+                ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
+                    CHECK(is_active IN (0, 1))
+                """
+            )
 
         await database.execute(
             """
@@ -62,9 +81,10 @@ async def add_clinic(
                 INSERT INTO clinics (
                     name,
                     primary_price,
-                    secondary_price
+                    secondary_price,
+                    is_active
                 )
-                VALUES (?, ?, ?)
+                VALUES (?, ?, ?, 1)
                 """,
                 (
                     name,
@@ -90,6 +110,7 @@ async def get_clinics() -> list[tuple[int, str, int, int]]:
                 primary_price,
                 secondary_price
             FROM clinics
+            WHERE is_active = 1
             ORDER BY name
             """
         )
@@ -112,6 +133,7 @@ async def get_clinic_by_id(
                 secondary_price
             FROM clinics
             WHERE id = ?
+              AND is_active = 1
             """,
             (clinic_id,),
         )
@@ -119,33 +141,6 @@ async def get_clinic_by_id(
         row = await cursor.fetchone()
 
     return row
-
-
-async def update_clinic_prices(
-    clinic_id: int,
-    primary_price: int,
-    secondary_price: int,
-) -> bool:
-    async with aiosqlite.connect(DB_PATH) as database:
-        cursor = await database.execute(
-            """
-            UPDATE clinics
-            SET
-                primary_price = ?,
-                secondary_price = ?
-            WHERE id = ?
-            """,
-            (
-                primary_price,
-                secondary_price,
-                clinic_id,
-            ),
-        )
-        await database.commit()
-
-        updated = cursor.rowcount > 0
-
-    return updated
 
 
 async def update_clinic(
@@ -164,6 +159,7 @@ async def update_clinic(
                     primary_price = ?,
                     secondary_price = ?
                 WHERE id = ?
+                  AND is_active = 1
                 """,
                 (
                     name,
@@ -181,6 +177,52 @@ async def update_clinic(
 
     except sqlite3.IntegrityError:
         return "duplicate_name"
+
+
+async def update_clinic_prices(
+    clinic_id: int,
+    primary_price: int,
+    secondary_price: int,
+) -> bool:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            UPDATE clinics
+            SET
+                primary_price = ?,
+                secondary_price = ?
+            WHERE id = ?
+              AND is_active = 1
+            """,
+            (
+                primary_price,
+                secondary_price,
+                clinic_id,
+            ),
+        )
+        await database.commit()
+
+        updated = cursor.rowcount > 0
+
+    return updated
+
+
+async def archive_clinic(clinic_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            UPDATE clinics
+            SET is_active = 0
+            WHERE id = ?
+              AND is_active = 1
+            """,
+            (clinic_id,),
+        )
+        await database.commit()
+
+        archived = cursor.rowcount > 0
+
+    return archived
 
 
 async def add_appointment(
@@ -207,6 +249,7 @@ async def add_appointment(
                 {price_column}
             FROM clinics
             WHERE id = ?
+              AND is_active = 1
             """,
             (clinic_id,),
         )

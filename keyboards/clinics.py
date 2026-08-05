@@ -23,12 +23,26 @@ def clinics_menu_keyboard(
     ]
 
     for clinic_id, name, _, _ in clinics:
-        buttons.append(
+        buttons.extend(
             [
-                InlineKeyboardButton(
-                    text=f"✏️ Изменить: {name}",
-                    callback_data=f"clinic:edit:{clinic_id}",
-                ),
+                [
+                    InlineKeyboardButton(
+                        text=f"✏️ Изменить всё: {name}",
+                        callback_data=f"clinic:edit:{clinic_id}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=f"💰 Изменить цены: {name}",
+                        callback_data=f"clinic:prices:{clinic_id}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=f"🗑 Удалить: {name}",
+                        callback_data=f"clinic:delete:{clinic_id}",
+                    ),
+                ],
             ]
         )
 
@@ -90,3 +104,26 @@ edit_clinic_confirmation_keyboard = InlineKeyboardMarkup(
         ],
     ]
 )
+
+
+def delete_clinic_confirmation_keyboard(
+    clinic_id: int,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🗑 Да, удалить",
+                    callback_data=(
+                        f"clinic:delete:confirm:{clinic_id}"
+                    ),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Нет, отменить",
+                    callback_data="clinic:delete:cancel",
+                ),
+            ],
+        ]
+    )

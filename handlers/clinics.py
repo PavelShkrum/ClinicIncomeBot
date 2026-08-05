@@ -6,15 +6,18 @@ from aiogram.types import CallbackQuery, Message
 
 from database.db import (
     add_clinic,
+    archive_clinic,
     get_clinic_by_id,
     get_clinics,
     update_clinic,
+    update_clinic_prices,
 )
 from keyboards.clinics import (
     KEEP_NAME_TEXT,
     KEEP_PRICE_TEXT,
     cancel_keyboard,
     clinics_menu_keyboard,
+    delete_clinic_confirmation_keyboard,
     edit_clinic_confirmation_keyboard,
     edit_name_keyboard,
     edit_price_keyboard,
@@ -153,6 +156,171 @@ async def start_edit_clinic_handler(
             "Введите новое название или оставьте текущее.",
             reply_markup=edit_name_keyboard,
             parse_mode="HTML",
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^clinic:prices:\d+$"))
+async def start_edit_prices_only_handler(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    clinic_id_text = callback.data.rsplit(":", maxsplit=1)[-1]
+
+    if not clinic_id_text.isdigit():
+        await callback.answer(
+            "Некорректная поликлиника.",
+            show_alert=True,
+        )
+        return
+
+    clinic_id = int(clinic_id_text)
+    clinic = await get_clinic_by_id(clinic_id)
+
+    if clinic is None:
+        await callback.answer(
+            "Поликлиника не найдена.",
+            show_alert=True,
+        )
+        return
+
+    _, name, primary_price, secondary_price = clinic
+
+    await state.clear()
+    await state.update_data(
+        clinic_id=clinic_id,
+        old_name=name,
+        new_name=name,
+        old_primary_price=primary_price,
+        old_secondary_price=secondary_price,
+    )
+    await state.set_state(EditClinic.primary_price)
+
+    if callback.message:
+        await callback.message.answer(
+            f"💰 Изменение цен: <b>{escape(name)}</b>\n\n"
+            "Введите новую стоимость первичного приёма.\n"
+            f"Сейчас: {format_price(primary_price)} ₽",
+            reply_markup=edit_price_keyboard,
+            parse_mode="HTML",
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^clinic:delete:\d+$"))
+async def request_delete_clinic_handler(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    clinic_id_text = callback.data.rsplit(":", maxsplit=1)[-1]
+
+    if not clinic_id_text.isdigit():
+        await callback.answer(
+            "Некорректная поликлиника.",
+            show_alert=True,
+        )
+        return
+
+    clinic_id = int(clinic_id_text)
+    clinic = await get_clinic_by_id(clinic_id)
+
+    if clinic is None:
+        await callback.answer(
+            "Поликлиника не найдена.",
+            show_alert=True,
+        )
+        return
+
+    _, name, _, _ = clinic
+    await state.clear()
+
+    if callback.message:
+        await callback.message.edit_text(
+            "🗑 <b>Удаление поликлиники</b>\n\n"
+            f"🏥 <b>{escape(name)}</b>\n\n"
+            "Она исчезнет из выбора для новых приёмов.\n"
+            "Старые приёмы и статистика сохранятся.\n\n"
+            "Удалить поликлинику?",
+            reply_markup=delete_clinic_confirmation_keyboard(
+                clinic_id
+            ),
+            parse_mode="HTML",
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(
+    F.data.regexp(r"^clinic:delete:confirm:\d+$")
+)
+async def confirm_delete_clinic_handler(
+    callback: CallbackQuery,
+) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    clinic_id_text = callback.data.rsplit(":", maxsplit=1)[-1]
+
+    if not clinic_id_text.isdigit():
+        await callback.answer(
+            "Некорректная поликлиника.",
+            show_alert=True,
+        )
+        return
+
+    clinic_id = int(clinic_id_text)
+    clinic = await get_clinic_by_id(clinic_id)
+
+    if clinic is None:
+        await callback.answer(
+            "Поликлиника уже удалена.",
+            show_alert=True,
+        )
+        return
+
+    _, name, _, _ = clinic
+    archived = await archive_clinic(clinic_id)
+
+    if not archived:
+        await callback.answer(
+            "Не удалось удалить поликлинику.",
+            show_alert=True,
+        )
+        return
+
+    if callback.message:
+        await callback.message.edit_text(
+            "✅ Поликлиника удалена из активных.\n\n"
+            f"🏥 <b>{escape(name)}</b>\n\n"
+            "Старые приёмы и статистика сохранены.",
+            parse_mode="HTML",
+        )
+        await callback.message.answer(
+            "Выберите действие:",
+            reply_markup=get_main_keyboard(is_admin=True),
+        )
+
+    await callback.answer("Поликлиника удалена")
+
+
+@router.callback_query(F.data == "clinic:delete:cancel")
+async def cancel_delete_clinic_handler(
+    callback: CallbackQuery,
+) -> None:
+    if callback.message:
+        await callback.message.edit_text(
+            "Удаление поликлиники отменено."
         )
 
     await callback.answer()
