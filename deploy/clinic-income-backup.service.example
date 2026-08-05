@@ -1,0 +1,9 @@
+[Unit]
+Description=ClinicIncomeBot SQLite backup
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/clinic-income-bot
+ExecStart=/opt/clinic-income-bot/venv/bin/python /opt/clinic-income-bot/scripts/backup_db.py

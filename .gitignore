@@ -1,0 +1,49 @@
+# Secrets
+.env
+
+# Virtual environments
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite data
+clinic_income.db
+clinic_income.db-*
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Database backups and temporary project backups
+backups/
+_backup*/
+*.backup
+*.bak
+
+# Development update scripts
+update_stage_*.ps1
+finish_stage_*.ps1
+setup_stage_*.ps1
+download_stage_*.ps1
+restore_stage_*.ps1
+prepare_stage_*.ps1
+upload_stage_*.ps1
+
+# Local deployment notes
+DEPLOY_NOTE.txt
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and archives
+*.log
+*.zip
+*.tar
+*.tar.gz

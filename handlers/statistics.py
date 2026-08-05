@@ -1,0 +1,536 @@
+﻿from datetime import date, datetime, time, timedelta, timezone
+from html import escape
+
+from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+
+from database.db import get_appointment_statistics
+from keyboards.main import get_main_keyboard
+from keyboards.period_calendar import period_calendar_keyboard
+from states.statistics import PeriodSelection
+
+
+router = Router()
+
+MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
+
+MONTH_NAMES = {
+    1: "Январь",
+    2: "Февраль",
+    3: "Март",
+    4: "Апрель",
+    5: "Май",
+    6: "Июнь",
+    7: "Июль",
+    8: "Август",
+    9: "Сентябрь",
+    10: "Октябрь",
+    11: "Ноябрь",
+    12: "Декабрь",
+}
+
+
+def format_price(price: int) -> str:
+    return f"{price:,}".replace(",", " ")
+
+
+def appointment_word(count: int) -> str:
+    last_two_digits = count % 100
+    last_digit = count % 10
+
+    if last_two_digits in {11, 12, 13, 14}:
+        return "приёмов"
+
+    if last_digit == 1:
+        return "приём"
+
+    if last_digit in {2, 3, 4}:
+        return "приёма"
+
+    return "приёмов"
+
+
+def next_month_start(current_date: date) -> date:
+    if current_date.month == 12:
+        return date(
+            year=current_date.year + 1,
+            month=1,
+            day=1,
+        )
+
+    return date(
+        year=current_date.year,
+        month=current_date.month + 1,
+        day=1,
+    )
+
+
+def parse_calendar_callback(
+    callback_data: str,
+    expected_action: str,
+    expected_mode: str,
+) -> list[str] | None:
+    parts = callback_data.split(":")
+
+    if len(parts) < 5:
+        return None
+
+    if parts[0] != "period":
+        return None
+
+    if parts[1] != expected_action:
+        return None
+
+    if parts[2] != expected_mode:
+        return None
+
+    return parts
+
+
+async def build_statistics_text(
+    start_local: datetime,
+    end_local: datetime,
+    title: str,
+    period_label: str,
+) -> str:
+    start_utc = start_local.astimezone(timezone.utc).isoformat(
+        timespec="seconds"
+    )
+    end_utc = end_local.astimezone(timezone.utc).isoformat(
+        timespec="seconds"
+    )
+
+    rows = await get_appointment_statistics(
+        start_at=start_utc,
+        end_at=end_utc,
+    )
+
+    if not rows:
+        return (
+            f"{title}\n"
+            f"{period_label}\n\n"
+            "Приёмов пока нет."
+        )
+
+    clinics: dict[int, dict[str, object]] = {}
+
+    for (
+        clinic_id,
+        clinic_name,
+        visit_type,
+        appointment_count,
+        total_amount,
+    ) in rows:
+        if clinic_id not in clinics:
+            clinics[clinic_id] = {
+                "name": clinic_name,
+                "primary_count": 0,
+                "primary_amount": 0,
+                "secondary_count": 0,
+                "secondary_amount": 0,
+            }
+
+        clinic_data = clinics[clinic_id]
+
+        if visit_type == "primary":
+            clinic_data["primary_count"] = int(appointment_count)
+            clinic_data["primary_amount"] = int(total_amount)
+        else:
+            clinic_data["secondary_count"] = int(appointment_count)
+            clinic_data["secondary_amount"] = int(total_amount)
+
+    lines = [
+        title,
+        period_label,
+        "",
+    ]
+
+    total_count = 0
+    total_amount = 0
+
+    for clinic_data in clinics.values():
+        clinic_name = escape(str(clinic_data["name"]))
+
+        primary_count = int(clinic_data["primary_count"])
+        primary_amount = int(clinic_data["primary_amount"])
+        secondary_count = int(clinic_data["secondary_count"])
+        secondary_amount = int(clinic_data["secondary_amount"])
+
+        clinic_count = primary_count + secondary_count
+        clinic_amount = primary_amount + secondary_amount
+
+        total_count += clinic_count
+        total_amount += clinic_amount
+
+        lines.extend(
+            [
+                f"🏥 <b>{clinic_name}</b>",
+                (
+                    f"Первичных: {primary_count} — "
+                    f"{format_price(primary_amount)} ₽"
+                ),
+                (
+                    f"Вторичных: {secondary_count} — "
+                    f"{format_price(secondary_amount)} ₽"
+                ),
+                (
+                    f"Итого: {clinic_count} "
+                    f"{appointment_word(clinic_count)} — "
+                    f"{format_price(clinic_amount)} ₽"
+                ),
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "💰 <b>Общий итог</b>",
+            (
+                f"{total_count} {appointment_word(total_count)} — "
+                f"{format_price(total_amount)} ₽"
+            ),
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+@router.message(F.text == "🐈‍⬛ Выбрать период")
+async def start_period_selection_handler(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+    await state.set_state(PeriodSelection.choosing_start)
+
+    today = datetime.now(MOSCOW_TIMEZONE).date()
+
+    await message.answer(
+        "🗓 <b>Выберите начальную дату</b>",
+        reply_markup=period_calendar_keyboard(
+            mode="start",
+            year=today.year,
+            month=today.month,
+        ),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "period:noop")
+async def period_noop_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+
+
+@router.callback_query(F.data == "period:cancel")
+async def cancel_period_selection_handler(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+
+    if callback.message:
+        await callback.message.edit_text(
+            "Выбор периода отменён."
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(
+    PeriodSelection.choosing_start,
+    F.data.startswith("period:nav:start:"),
+)
+async def navigate_start_calendar_handler(
+    callback: CallbackQuery,
+) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    parts = parse_calendar_callback(
+        callback.data,
+        expected_action="nav",
+        expected_mode="start",
+    )
+
+    if parts is None or len(parts) != 5:
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    year_text = parts[3]
+    month_text = parts[4]
+
+    if not year_text.isdigit() or not month_text.isdigit():
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    year = int(year_text)
+    month = int(month_text)
+
+    if year < 2000 or year > 2100 or month < 1 or month > 12:
+        await callback.answer(
+            "Дата вне допустимого диапазона.",
+            show_alert=True,
+        )
+        return
+
+    if callback.message:
+        await callback.message.edit_reply_markup(
+            reply_markup=period_calendar_keyboard(
+                mode="start",
+                year=year,
+                month=month,
+            )
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(
+    PeriodSelection.choosing_start,
+    F.data.startswith("period:day:start:"),
+)
+async def select_start_date_handler(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    parts = parse_calendar_callback(
+        callback.data,
+        expected_action="day",
+        expected_mode="start",
+    )
+
+    if parts is None or len(parts) != 6:
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    date_parts = parts[3:6]
+
+    if not all(part.isdigit() for part in date_parts):
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    try:
+        selected_start = date(
+            int(date_parts[0]),
+            int(date_parts[1]),
+            int(date_parts[2]),
+        )
+    except ValueError:
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    await state.update_data(
+        start_date=selected_start.isoformat()
+    )
+    await state.set_state(PeriodSelection.choosing_end)
+
+    if callback.message:
+        await callback.message.edit_text(
+            "🗓 <b>Выберите конечную дату</b>\n\n"
+            f"Начало: {selected_start.strftime('%d.%m.%Y')}",
+            reply_markup=period_calendar_keyboard(
+                mode="end",
+                year=selected_start.year,
+                month=selected_start.month,
+                selected_start=selected_start,
+            ),
+            parse_mode="HTML",
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(
+    PeriodSelection.choosing_end,
+    F.data.startswith("period:nav:end:"),
+)
+async def navigate_end_calendar_handler(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    parts = parse_calendar_callback(
+        callback.data,
+        expected_action="nav",
+        expected_mode="end",
+    )
+
+    if parts is None or len(parts) != 5:
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    year_text = parts[3]
+    month_text = parts[4]
+
+    if not year_text.isdigit() or not month_text.isdigit():
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    year = int(year_text)
+    month = int(month_text)
+
+    if year < 2000 or year > 2100 or month < 1 or month > 12:
+        await callback.answer(
+            "Дата вне допустимого диапазона.",
+            show_alert=True,
+        )
+        return
+
+    data = await state.get_data()
+    start_date_text = data.get("start_date")
+
+    if not start_date_text:
+        await state.clear()
+        await callback.answer(
+            "Начальная дата потеряна. Выберите период заново.",
+            show_alert=True,
+        )
+        return
+
+    selected_start = date.fromisoformat(str(start_date_text))
+
+    if callback.message:
+        await callback.message.edit_reply_markup(
+            reply_markup=period_calendar_keyboard(
+                mode="end",
+                year=year,
+                month=month,
+                selected_start=selected_start,
+            )
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(
+    PeriodSelection.choosing_end,
+    F.data.startswith("period:day:end:"),
+)
+async def select_end_date_handler(
+    callback: CallbackQuery,
+    state: FSMContext,
+    is_admin: bool,
+) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    parts = parse_calendar_callback(
+        callback.data,
+        expected_action="day",
+        expected_mode="end",
+    )
+
+    if parts is None or len(parts) != 6:
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    date_parts = parts[3:6]
+
+    if not all(part.isdigit() for part in date_parts):
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    try:
+        selected_end = date(
+            int(date_parts[0]),
+            int(date_parts[1]),
+            int(date_parts[2]),
+        )
+    except ValueError:
+        await callback.answer(
+            "Некорректная дата.",
+            show_alert=True,
+        )
+        return
+
+    data = await state.get_data()
+    start_date_text = data.get("start_date")
+
+    if not start_date_text:
+        await state.clear()
+        await callback.answer(
+            "Начальная дата потеряна. Выберите период заново.",
+            show_alert=True,
+        )
+        return
+
+    selected_start = date.fromisoformat(str(start_date_text))
+
+    if selected_end < selected_start:
+        await callback.answer(
+            "Конечная дата не может быть раньше начальной.",
+            show_alert=True,
+        )
+        return
+
+    start_local = datetime.combine(
+        selected_start,
+        time.min,
+        tzinfo=MOSCOW_TIMEZONE,
+    )
+    end_local = datetime.combine(
+        selected_end + timedelta(days=1),
+        time.min,
+        tzinfo=MOSCOW_TIMEZONE,
+    )
+
+    text = await build_statistics_text(
+        start_local=start_local,
+        end_local=end_local,
+        title="🗓 <b>Выбранный период</b>",
+        period_label=(
+            f"{selected_start.strftime('%d.%m.%Y')} — "
+            f"{selected_end.strftime('%d.%m.%Y')}"
+        ),
+    )
+
+    await state.clear()
+
+    if callback.message:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+        )
+        await callback.message.answer(
+            "Выберите действие:",
+            reply_markup=get_main_keyboard(is_admin),
+        )
+
+    await callback.answer("Статистика рассчитана")

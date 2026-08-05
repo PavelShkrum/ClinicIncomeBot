@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ClinicIncomeBot database backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Europe/Moscow
+Persistent=true
+Unit=clinic-income-backup.service
+
+[Install]
+WantedBy=timers.target

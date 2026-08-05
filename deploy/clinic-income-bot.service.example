@@ -1,0 +1,16 @@
+[Unit]
+Description=Clinic Income Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/clinic-income-bot
+ExecStart=/opt/clinic-income-bot/venv/bin/python /opt/clinic-income-bot/main.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
