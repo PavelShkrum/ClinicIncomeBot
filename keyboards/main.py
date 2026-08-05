@@ -8,6 +8,9 @@ def get_main_keyboard(is_admin: bool = True) -> ReplyKeyboardMarkup:
                 KeyboardButton(text="🐾 Добавить приём"),
             ],
             [
+                KeyboardButton(text="📅 Добавить за дату"),
+            ],
+            [
                 KeyboardButton(text="😺 Сегодня"),
                 KeyboardButton(text="😸 Этот месяц"),
             ],

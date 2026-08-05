@@ -1,4 +1,6 @@
-﻿from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import date
+
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def format_price(price: int) -> str:
@@ -71,6 +73,155 @@ def appointment_type_keyboard(
                 InlineKeyboardButton(
                     text="❌ Отмена",
                     callback_data="appointment:cancel",
+                )
+            ],
+        ]
+    )
+
+
+def backdated_clinics_keyboard(
+    clinics: list[tuple[int, str, int, int]],
+    appointment_date: date,
+) -> InlineKeyboardMarkup:
+    date_text = appointment_date.isoformat()
+    buttons = []
+
+    for clinic_id, name, _, _ in clinics:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"🏥 {name}",
+                    callback_data=(
+                        f"past:clinic:{date_text}:{clinic_id}"
+                    ),
+                )
+            ]
+        )
+
+    buttons.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Выбрать другую дату",
+                    callback_data=(
+                        f"past:calendar:{appointment_date.year}:"
+                        f"{appointment_date.month}"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="past:cancel",
+                )
+            ],
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def backdated_type_keyboard(
+    appointment_date: date,
+    clinic_id: int,
+    primary_price: int,
+    secondary_price: int,
+) -> InlineKeyboardMarkup:
+    date_text = appointment_date.isoformat()
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=(
+                        "Первичный — "
+                        f"{format_price(primary_price)} ₽"
+                    ),
+                    callback_data=(
+                        f"past:type:{date_text}:{clinic_id}:primary"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=(
+                        "Вторичный — "
+                        f"{format_price(secondary_price)} ₽"
+                    ),
+                    callback_data=(
+                        f"past:type:{date_text}:{clinic_id}:secondary"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Другая поликлиника",
+                    callback_data=f"past:clinics:{date_text}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="past:cancel",
+                )
+            ],
+        ]
+    )
+
+
+def backdated_confirmation_keyboard(
+    appointment_date: date,
+    clinic_id: int,
+    visit_type: str,
+) -> InlineKeyboardMarkup:
+    date_text = appointment_date.isoformat()
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Сохранить приём",
+                    callback_data=(
+                        f"past:confirm:{date_text}:"
+                        f"{clinic_id}:{visit_type}"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Изменить тип",
+                    callback_data=(
+                        f"past:clinic:{date_text}:{clinic_id}"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="past:cancel",
+                )
+            ],
+        ]
+    )
+
+
+def backdated_result_keyboard(
+    appointment_date: date,
+) -> InlineKeyboardMarkup:
+    date_text = appointment_date.isoformat()
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Ещё приём на эту дату",
+                    callback_data=f"past:clinics:{date_text}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✅ Готово",
+                    callback_data="past:done",
                 )
             ],
         ]

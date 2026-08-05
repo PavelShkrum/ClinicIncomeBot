@@ -1,4 +1,4 @@
-﻿import sqlite3
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -151,6 +151,7 @@ async def update_clinic_prices(
 async def add_appointment(
     clinic_id: int,
     visit_type: str,
+    created_at: str | None = None,
 ) -> tuple[str, int] | None:
     if visit_type not in {"primary", "secondary"}:
         return None
@@ -182,7 +183,13 @@ async def add_appointment(
 
         clinic_name = str(clinic[0])
         amount = int(clinic[1])
-        created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        appointment_created_at = (
+            created_at
+            if created_at is not None
+            else datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            )
+        )
 
         await database.execute(
             """
@@ -198,7 +205,7 @@ async def add_appointment(
                 clinic_id,
                 visit_type,
                 amount,
-                created_at,
+                appointment_created_at,
             ),
         )
 
