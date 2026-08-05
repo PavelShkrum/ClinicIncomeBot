@@ -1,4 +1,4 @@
-﻿from html import escape
+from html import escape
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -8,12 +8,16 @@ from database.db import (
     add_clinic,
     get_clinic_by_id,
     get_clinics,
-    update_clinic_prices,
+    update_clinic,
 )
 from keyboards.clinics import (
+    KEEP_NAME_TEXT,
+    KEEP_PRICE_TEXT,
     cancel_keyboard,
     clinics_menu_keyboard,
-    edit_prices_confirmation_keyboard,
+    edit_clinic_confirmation_keyboard,
+    edit_name_keyboard,
+    edit_price_keyboard,
 )
 from keyboards.main import get_main_keyboard
 from states.clinic import AddClinic, EditClinic
@@ -43,6 +47,18 @@ def parse_price(text: str) -> int | None:
         return None
 
     return price
+
+
+def validate_clinic_name(text: str) -> str | None:
+    clinic_name = text.strip()
+
+    if len(clinic_name) < 2:
+        return None
+
+    if len(clinic_name) > 60:
+        return None
+
+    return clinic_name
 
 
 @router.message(F.text == "😼 Поликлиники и цены")
@@ -124,18 +140,18 @@ async def start_edit_clinic_handler(
     await state.clear()
     await state.update_data(
         clinic_id=clinic_id,
-        clinic_name=name,
+        old_name=name,
         old_primary_price=primary_price,
         old_secondary_price=secondary_price,
     )
-    await state.set_state(EditClinic.primary_price)
+    await state.set_state(EditClinic.name)
 
     if callback.message:
         await callback.message.answer(
-            f"✏️ Изменение цен: <b>{escape(name)}</b>\n\n"
-            "Введите новую стоимость первичного приёма.\n"
-            f"Сейчас: {format_price(primary_price)} ₽",
-            reply_markup=cancel_keyboard,
+            "✏️ <b>Изменение поликлиники</b>\n\n"
+            f"Текущее название: <b>{escape(name)}</b>\n\n"
+            "Введите новое название или оставьте текущее.",
+            reply_markup=edit_name_keyboard,
             parse_mode="HTML",
         )
 
@@ -173,17 +189,12 @@ async def clinic_name_handler(
         await message.answer("Введите название текстом.")
         return
 
-    clinic_name = message.text.strip()
+    clinic_name = validate_clinic_name(message.text)
 
-    if len(clinic_name) < 2:
+    if clinic_name is None:
         await message.answer(
-            "Название слишком короткое. Введите ещё раз."
-        )
-        return
-
-    if len(clinic_name) > 60:
-        await message.answer(
-            "Название слишком длинное. Используйте не более 60 символов."
+            "Название должно содержать от 2 до 60 символов.\n"
+            "Введите название ещё раз."
         )
         return
 
@@ -270,6 +281,44 @@ async def secondary_price_handler(
     )
 
 
+@router.message(EditClinic.name)
+async def edit_clinic_name_handler(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    if not message.text:
+        await message.answer("Введите название текстом.")
+        return
+
+    data = await state.get_data()
+    old_name = str(data["old_name"])
+
+    if message.text == KEEP_NAME_TEXT:
+        new_name = old_name
+    else:
+        parsed_name = validate_clinic_name(message.text)
+
+        if parsed_name is None:
+            await message.answer(
+                "Название должно содержать от 2 до 60 символов.\n"
+                "Введите название ещё раз."
+            )
+            return
+
+        new_name = parsed_name
+
+    await state.update_data(new_name=new_name)
+    await state.set_state(EditClinic.primary_price)
+
+    old_primary_price = int(data["old_primary_price"])
+
+    await message.answer(
+        "Введите новую стоимость первичного приёма.\n\n"
+        f"Сейчас: {format_price(old_primary_price)} ₽",
+        reply_markup=edit_price_keyboard,
+    )
+
+
 @router.message(EditClinic.primary_price)
 async def edit_primary_price_handler(
     message: Message,
@@ -279,24 +328,32 @@ async def edit_primary_price_handler(
         await message.answer("Введите сумму цифрами.")
         return
 
-    primary_price = parse_price(message.text)
+    data = await state.get_data()
+    old_primary_price = int(data["old_primary_price"])
 
-    if primary_price is None:
-        await message.answer(
-            "Не удалось распознать сумму.\n\n"
-            "Введите целое число, например: 2500"
-        )
-        return
+    if message.text == KEEP_PRICE_TEXT:
+        primary_price = old_primary_price
+    else:
+        parsed_price = parse_price(message.text)
+
+        if parsed_price is None:
+            await message.answer(
+                "Не удалось распознать сумму.\n\n"
+                "Введите целое число, например: 2500"
+            )
+            return
+
+        primary_price = parsed_price
 
     await state.update_data(new_primary_price=primary_price)
     await state.set_state(EditClinic.secondary_price)
 
-    data = await state.get_data()
     old_secondary_price = int(data["old_secondary_price"])
 
     await message.answer(
-        "Введите новую стоимость вторичного приёма.\n"
-        f"Сейчас: {format_price(old_secondary_price)} ₽"
+        "Введите новую стоимость вторичного приёма.\n\n"
+        f"Сейчас: {format_price(old_secondary_price)} ₽",
+        reply_markup=edit_price_keyboard,
     )
 
 
@@ -309,30 +366,45 @@ async def edit_secondary_price_handler(
         await message.answer("Введите сумму цифрами.")
         return
 
-    secondary_price = parse_price(message.text)
+    data = await state.get_data()
+    old_secondary_price = int(data["old_secondary_price"])
 
-    if secondary_price is None:
-        await message.answer(
-            "Не удалось распознать сумму.\n\n"
-            "Введите целое число, например: 1800"
-        )
-        return
+    if message.text == KEEP_PRICE_TEXT:
+        secondary_price = old_secondary_price
+    else:
+        parsed_price = parse_price(message.text)
+
+        if parsed_price is None:
+            await message.answer(
+                "Не удалось распознать сумму.\n\n"
+                "Введите целое число, например: 1800"
+            )
+            return
+
+        secondary_price = parsed_price
 
     await state.update_data(new_secondary_price=secondary_price)
     await state.set_state(EditClinic.confirmation)
 
     data = await state.get_data()
 
-    clinic_name = escape(str(data["clinic_name"]))
-    primary_price = int(data["new_primary_price"])
+    old_name = escape(str(data["old_name"]))
+    new_name = escape(str(data["new_name"]))
+    old_primary_price = int(data["old_primary_price"])
+    new_primary_price = int(data["new_primary_price"])
 
     await message.answer(
-        "Проверьте новые цены:\n\n"
-        f"🏥 <b>{clinic_name}</b>\n"
-        f"Первичный: {format_price(primary_price)} ₽\n"
+        "Проверьте изменения:\n\n"
+        "<b>Было</b>\n"
+        f"🏥 {old_name}\n"
+        f"Первичный: {format_price(old_primary_price)} ₽\n"
+        f"Вторичный: {format_price(old_secondary_price)} ₽\n\n"
+        "<b>Станет</b>\n"
+        f"🏥 {new_name}\n"
+        f"Первичный: {format_price(new_primary_price)} ₽\n"
         f"Вторичный: {format_price(secondary_price)} ₽\n\n"
         "Сохранить изменения?",
-        reply_markup=edit_prices_confirmation_keyboard,
+        reply_markup=edit_clinic_confirmation_keyboard,
         parse_mode="HTML",
     )
 
@@ -341,35 +413,52 @@ async def edit_secondary_price_handler(
     EditClinic.confirmation,
     F.data == "clinic:edit:save",
 )
-async def save_edited_prices_handler(
+async def save_edited_clinic_handler(
     callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
     data = await state.get_data()
 
     clinic_id = int(data["clinic_id"])
-    clinic_name = str(data["clinic_name"])
+    clinic_name = str(data["new_name"])
     primary_price = int(data["new_primary_price"])
     secondary_price = int(data["new_secondary_price"])
 
-    updated = await update_clinic_prices(
+    result = await update_clinic(
         clinic_id=clinic_id,
+        name=clinic_name,
         primary_price=primary_price,
         secondary_price=secondary_price,
     )
 
     await state.clear()
 
-    if not updated:
+    if result == "not_found":
         await callback.answer(
             "Поликлиника не найдена.",
             show_alert=True,
         )
         return
 
+    if result == "duplicate_name":
+        if callback.message:
+            await callback.message.edit_text(
+                "Поликлиника с таким названием уже существует."
+            )
+            await callback.message.answer(
+                "Выберите действие:",
+                reply_markup=get_main_keyboard(is_admin=True),
+            )
+
+        await callback.answer(
+            "Название уже занято.",
+            show_alert=True,
+        )
+        return
+
     if callback.message:
         await callback.message.edit_text(
-            "✅ <b>Цены обновлены</b>\n\n"
+            "✅ <b>Поликлиника обновлена</b>\n\n"
             f"🏥 {escape(clinic_name)}\n"
             f"Первичный: {format_price(primary_price)} ₽\n"
             f"Вторичный: {format_price(secondary_price)} ₽",
@@ -380,14 +469,14 @@ async def save_edited_prices_handler(
             reply_markup=get_main_keyboard(is_admin=True),
         )
 
-    await callback.answer("Новые цены сохранены")
+    await callback.answer("Изменения сохранены")
 
 
 @router.callback_query(
     EditClinic.confirmation,
     F.data == "clinic:edit:cancel",
 )
-async def cancel_edited_prices_handler(
+async def cancel_edited_clinic_handler(
     callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
@@ -395,7 +484,7 @@ async def cancel_edited_prices_handler(
 
     if callback.message:
         await callback.message.edit_text(
-            "Изменение цен отменено."
+            "Изменение поликлиники отменено."
         )
         await callback.message.answer(
             "Выберите действие:",

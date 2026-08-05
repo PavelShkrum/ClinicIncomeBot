@@ -1,4 +1,4 @@
-﻿from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import State, StatesGroup
 
 
 class AddClinic(StatesGroup):
@@ -8,6 +8,7 @@ class AddClinic(StatesGroup):
 
 
 class EditClinic(StatesGroup):
+    name = State()
     primary_price = State()
     secondary_price = State()
     confirmation = State()

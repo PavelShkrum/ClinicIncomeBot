@@ -148,6 +148,41 @@ async def update_clinic_prices(
     return updated
 
 
+async def update_clinic(
+    clinic_id: int,
+    name: str,
+    primary_price: int,
+    secondary_price: int,
+) -> str:
+    try:
+        async with aiosqlite.connect(DB_PATH) as database:
+            cursor = await database.execute(
+                """
+                UPDATE clinics
+                SET
+                    name = ?,
+                    primary_price = ?,
+                    secondary_price = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    primary_price,
+                    secondary_price,
+                    clinic_id,
+                ),
+            )
+            await database.commit()
+
+            if cursor.rowcount == 0:
+                return "not_found"
+
+        return "updated"
+
+    except sqlite3.IntegrityError:
+        return "duplicate_name"
+
+
 async def add_appointment(
     clinic_id: int,
     visit_type: str,
