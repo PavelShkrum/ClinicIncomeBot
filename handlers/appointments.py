@@ -5,19 +5,23 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 
 from database.db import (
-    add_appointment,
+    add_specialty_appointment,
     get_clinic_by_id,
     get_clinics,
+    get_specialties,
+    get_specialty_by_id,
 )
 from keyboards.appointment_date import (
     appointment_date_calendar_keyboard,
 )
 from keyboards.appointments import (
     appointment_clinics_keyboard,
+    appointment_specialties_keyboard,
     appointment_type_keyboard,
     backdated_clinics_keyboard,
     backdated_confirmation_keyboard,
     backdated_result_keyboard,
+    backdated_specialties_keyboard,
     backdated_type_keyboard,
 )
 from keyboards.main import get_main_keyboard
@@ -44,6 +48,14 @@ def parse_iso_date(date_text: str) -> date | None:
     return parsed_date
 
 
+def visit_type_title(visit_type: str) -> str:
+    return (
+        "Первичный"
+        if visit_type == "primary"
+        else "Повторный"
+    )
+
+
 async def show_clinic_selection(
     message: Message,
     is_admin: bool,
@@ -54,7 +66,7 @@ async def show_clinic_selection(
     if not clinics:
         text = (
             "Поликлиники пока не настроены.\n\n"
-            "Обратитесь к администратору бота."
+            "Сначала добавьте поликлинику и специальность."
         )
 
         if edit_message:
@@ -67,7 +79,7 @@ async def show_clinic_selection(
 
         return
 
-    text = "Выберите поликлинику:"
+    text = "🏥 Выберите поликлинику:"
 
     if edit_message:
         await message.edit_text(
@@ -81,6 +93,41 @@ async def show_clinic_selection(
         )
 
 
+async def show_specialty_selection(
+    message: Message,
+    clinic_id: int,
+) -> bool:
+    clinic = await get_clinic_by_id(clinic_id)
+
+    if clinic is None:
+        return False
+
+    _, clinic_name, _, _ = clinic
+    specialties = await get_specialties(clinic_id)
+
+    if not specialties:
+        await message.edit_text(
+            f"🏥 <b>{escape(clinic_name)}</b>\n\n"
+            "В этой поликлинике нет активных специальностей.\n"
+            "Сначала добавьте специальность в разделе "
+            "«Поликлиники и цены».",
+            parse_mode="HTML",
+        )
+        return True
+
+    await message.edit_text(
+        f"🏥 <b>{escape(clinic_name)}</b>\n\n"
+        "🩺 Выберите специальность:",
+        reply_markup=appointment_specialties_keyboard(
+            clinic_id=clinic_id,
+            specialties=specialties,
+        ),
+        parse_mode="HTML",
+    )
+
+    return True
+
+
 async def show_backdated_clinic_selection(
     message: Message,
     selected_date: date,
@@ -91,7 +138,7 @@ async def show_backdated_clinic_selection(
     if not clinics:
         text = (
             "Поликлиники пока не настроены.\n\n"
-            "Сначала добавьте поликлинику и цены."
+            "Сначала добавьте поликлинику и специальность."
         )
 
         if edit_message:
@@ -104,7 +151,7 @@ async def show_backdated_clinic_selection(
     text = (
         "📅 <b>Добавление приёма за дату</b>\n\n"
         f"Дата: <b>{selected_date.strftime('%d.%m.%Y')}</b>\n\n"
-        "Выберите поликлинику:"
+        "🏥 Выберите поликлинику:"
     )
     keyboard = backdated_clinics_keyboard(
         clinics=clinics,
@@ -181,12 +228,8 @@ async def cancel_appointment_handler(
     await callback.answer()
 
 
-@router.callback_query(
-    F.data.startswith("appointment:clinic:")
-)
-async def select_clinic_handler(
-    callback: CallbackQuery,
-) -> None:
+@router.callback_query(F.data.startswith("appointment:clinic:"))
+async def select_clinic_handler(callback: CallbackQuery) -> None:
     if not callback.data:
         await callback.answer()
         return
@@ -200,24 +243,88 @@ async def select_clinic_handler(
         )
         return
 
-    clinic_id = int(clinic_id_text)
-    clinic = await get_clinic_by_id(clinic_id)
+    if callback.message:
+        found = await show_specialty_selection(
+            message=callback.message,
+            clinic_id=int(clinic_id_text),
+        )
 
-    if clinic is None:
+        if not found:
+            await callback.answer(
+                "Поликлиника не найдена.",
+                show_alert=True,
+            )
+            return
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("appointment:specialty:"))
+async def select_specialty_handler(callback: CallbackQuery) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    parts = callback.data.split(":")
+
+    if len(parts) != 4:
         await callback.answer(
-            "Поликлиника не найдена.",
+            "Некорректные данные.",
             show_alert=True,
         )
         return
 
-    _, name, primary_price, secondary_price = clinic
+    clinic_id_text = parts[2]
+    specialty_id_text = parts[3]
+
+    if (
+        not clinic_id_text.isdigit()
+        or not specialty_id_text.isdigit()
+    ):
+        await callback.answer(
+            "Некорректные данные.",
+            show_alert=True,
+        )
+        return
+
+    clinic_id = int(clinic_id_text)
+    specialty_id = int(specialty_id_text)
+
+    clinic = await get_clinic_by_id(clinic_id)
+    specialty = await get_specialty_by_id(specialty_id)
+
+    if clinic is None or specialty is None:
+        await callback.answer(
+            "Поликлиника или специальность не найдена.",
+            show_alert=True,
+        )
+        return
+
+    (
+        _,
+        specialty_clinic_id,
+        specialty_name,
+        primary_price,
+        secondary_price,
+    ) = specialty
+
+    if specialty_clinic_id != clinic_id:
+        await callback.answer(
+            "Специальность не относится к этой поликлинике.",
+            show_alert=True,
+        )
+        return
+
+    _, clinic_name, _, _ = clinic
 
     if callback.message:
         await callback.message.edit_text(
-            f"🏥 <b>{escape(name)}</b>\n\n"
+            f"🏥 <b>{escape(clinic_name)}</b>\n"
+            f"🩺 <b>{escape(specialty_name)}</b>\n\n"
             "Выберите тип приёма:",
             reply_markup=appointment_type_keyboard(
                 clinic_id=clinic_id,
+                specialty_id=specialty_id,
                 primary_price=primary_price,
                 secondary_price=secondary_price,
             ),
@@ -227,9 +334,7 @@ async def select_clinic_handler(
     await callback.answer()
 
 
-@router.callback_query(
-    F.data.startswith("appointment:type:")
-)
+@router.callback_query(F.data.startswith("appointment:type:"))
 async def select_appointment_type_handler(
     callback: CallbackQuery,
 ) -> None:
@@ -237,36 +342,44 @@ async def select_appointment_type_handler(
         await callback.answer()
         return
 
-    callback_parts = callback.data.split(":")
+    parts = callback.data.split(":")
 
-    if len(callback_parts) != 4:
+    if len(parts) != 5:
+        await callback.answer(
+            "Эта старая кнопка больше не действует.\n"
+            "Начните добавление приёма заново.",
+            show_alert=True,
+        )
+        return
+
+    clinic_id_text = parts[2]
+    specialty_id_text = parts[3]
+    visit_type = parts[4]
+
+    if (
+        not clinic_id_text.isdigit()
+        or not specialty_id_text.isdigit()
+        or visit_type not in {"primary", "secondary"}
+    ):
         await callback.answer(
             "Некорректные данные.",
             show_alert=True,
         )
         return
 
-    clinic_id_text = callback_parts[2]
-    visit_type = callback_parts[3]
-
-    if not clinic_id_text.isdigit():
-        await callback.answer(
-            "Некорректная поликлиника.",
-            show_alert=True,
-        )
-        return
-
-    if visit_type not in {"primary", "secondary"}:
-        await callback.answer(
-            "Некорректный тип приёма.",
-            show_alert=True,
-        )
-        return
-
     clinic_id = int(clinic_id_text)
+    specialty_id = int(specialty_id_text)
+    specialty = await get_specialty_by_id(specialty_id)
 
-    result = await add_appointment(
-        clinic_id=clinic_id,
+    if specialty is None or int(specialty[1]) != clinic_id:
+        await callback.answer(
+            "Специальность не найдена.",
+            show_alert=True,
+        )
+        return
+
+    result = await add_specialty_appointment(
+        specialty_id=specialty_id,
         visit_type=visit_type,
     )
 
@@ -277,19 +390,14 @@ async def select_appointment_type_handler(
         )
         return
 
-    clinic_name, amount = result
-
-    visit_type_name = (
-        "Первичный"
-        if visit_type == "primary"
-        else "Вторичный"
-    )
+    clinic_name, specialty_name, amount = result
 
     if callback.message:
         await callback.message.edit_text(
             "✅ <b>Приём добавлен</b>\n\n"
             f"🏥 {escape(clinic_name)}\n"
-            f"Тип: {visit_type_name}\n"
+            f"🩺 {escape(specialty_name)}\n"
+            f"Тип: {visit_type_title(visit_type)}\n"
             f"Сумма: {format_price(amount)} ₽",
             parse_mode="HTML",
         )
@@ -298,9 +406,7 @@ async def select_appointment_type_handler(
 
 
 @router.callback_query(F.data == "past:noop")
-async def backdated_noop_handler(
-    callback: CallbackQuery,
-) -> None:
+async def backdated_noop_handler(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
@@ -322,9 +428,7 @@ async def finish_backdated_appointment_handler(
     is_admin: bool,
 ) -> None:
     if callback.message:
-        await callback.message.edit_reply_markup(
-            reply_markup=None
-        )
+        await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer(
             "Готово. Выберите следующее действие:",
             reply_markup=get_main_keyboard(is_admin),
@@ -568,17 +672,106 @@ async def select_backdated_clinic_handler(
         )
         return
 
-    _, name, primary_price, secondary_price = clinic
+    specialties = await get_specialties(clinic_id)
+    _, clinic_name, _, _ = clinic
+
+    if not specialties:
+        await callback.answer(
+            "В этой поликлинике нет активных специальностей.",
+            show_alert=True,
+        )
+        return
 
     if callback.message:
         await callback.message.edit_text(
             "📅 <b>Добавление приёма за дату</b>\n\n"
             f"Дата: <b>{selected_date.strftime('%d.%m.%Y')}</b>\n"
-            f"Поликлиника: <b>{escape(name)}</b>\n\n"
+            f"Поликлиника: <b>{escape(clinic_name)}</b>\n\n"
+            "🩺 Выберите специальность:",
+            reply_markup=backdated_specialties_keyboard(
+                appointment_date=selected_date,
+                clinic_id=clinic_id,
+                specialties=specialties,
+            ),
+            parse_mode="HTML",
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("past:specialty:"))
+async def select_backdated_specialty_handler(
+    callback: CallbackQuery,
+) -> None:
+    if not callback.data:
+        await callback.answer()
+        return
+
+    parts = callback.data.split(":")
+
+    if len(parts) != 5:
+        await callback.answer(
+            "Некорректные данные.",
+            show_alert=True,
+        )
+        return
+
+    selected_date = parse_iso_date(parts[2])
+    clinic_id_text = parts[3]
+    specialty_id_text = parts[4]
+
+    if (
+        selected_date is None
+        or not clinic_id_text.isdigit()
+        or not specialty_id_text.isdigit()
+    ):
+        await callback.answer(
+            "Некорректные данные.",
+            show_alert=True,
+        )
+        return
+
+    clinic_id = int(clinic_id_text)
+    specialty_id = int(specialty_id_text)
+
+    clinic = await get_clinic_by_id(clinic_id)
+    specialty = await get_specialty_by_id(specialty_id)
+
+    if clinic is None or specialty is None:
+        await callback.answer(
+            "Поликлиника или специальность не найдена.",
+            show_alert=True,
+        )
+        return
+
+    (
+        _,
+        specialty_clinic_id,
+        specialty_name,
+        primary_price,
+        secondary_price,
+    ) = specialty
+
+    if specialty_clinic_id != clinic_id:
+        await callback.answer(
+            "Специальность не относится к этой поликлинике.",
+            show_alert=True,
+        )
+        return
+
+    _, clinic_name, _, _ = clinic
+
+    if callback.message:
+        await callback.message.edit_text(
+            "📅 <b>Добавление приёма за дату</b>\n\n"
+            f"Дата: <b>{selected_date.strftime('%d.%m.%Y')}</b>\n"
+            f"Поликлиника: <b>{escape(clinic_name)}</b>\n"
+            f"Специальность: <b>{escape(specialty_name)}</b>\n\n"
             "Выберите тип приёма:",
             reply_markup=backdated_type_keyboard(
                 appointment_date=selected_date,
                 clinic_id=clinic_id,
+                specialty_id=specialty_id,
                 primary_price=primary_price,
                 secondary_price=secondary_price,
             ),
@@ -598,20 +791,23 @@ async def select_backdated_type_handler(
 
     parts = callback.data.split(":")
 
-    if len(parts) != 5:
+    if len(parts) != 6:
         await callback.answer(
-            "Некорректные данные.",
+            "Эта старая кнопка больше не действует.\n"
+            "Начните добавление приёма заново.",
             show_alert=True,
         )
         return
 
     selected_date = parse_iso_date(parts[2])
     clinic_id_text = parts[3]
-    visit_type = parts[4]
+    specialty_id_text = parts[4]
+    visit_type = parts[5]
 
     if (
         selected_date is None
         or not clinic_id_text.isdigit()
+        or not specialty_id_text.isdigit()
         or visit_type not in {"primary", "secondary"}
     ):
         await callback.answer(
@@ -621,38 +817,53 @@ async def select_backdated_type_handler(
         return
 
     clinic_id = int(clinic_id_text)
-    clinic = await get_clinic_by_id(clinic_id)
+    specialty_id = int(specialty_id_text)
 
-    if clinic is None:
+    clinic = await get_clinic_by_id(clinic_id)
+    specialty = await get_specialty_by_id(specialty_id)
+
+    if clinic is None or specialty is None:
         await callback.answer(
-            "Поликлиника не найдена.",
+            "Поликлиника или специальность не найдена.",
             show_alert=True,
         )
         return
 
-    _, name, primary_price, secondary_price = clinic
+    (
+        _,
+        specialty_clinic_id,
+        specialty_name,
+        primary_price,
+        secondary_price,
+    ) = specialty
+
+    if specialty_clinic_id != clinic_id:
+        await callback.answer(
+            "Специальность не относится к этой поликлинике.",
+            show_alert=True,
+        )
+        return
+
+    _, clinic_name, _, _ = clinic
     amount = (
         primary_price
         if visit_type == "primary"
         else secondary_price
-    )
-    visit_type_name = (
-        "Первичный"
-        if visit_type == "primary"
-        else "Вторичный"
     )
 
     if callback.message:
         await callback.message.edit_text(
             "Проверьте данные:\n\n"
             f"📅 Дата: <b>{selected_date.strftime('%d.%m.%Y')}</b>\n"
-            f"🏥 Поликлиника: <b>{escape(name)}</b>\n"
-            f"Тип: <b>{visit_type_name}</b>\n"
+            f"🏥 Поликлиника: <b>{escape(clinic_name)}</b>\n"
+            f"🩺 Специальность: <b>{escape(specialty_name)}</b>\n"
+            f"Тип: <b>{visit_type_title(visit_type)}</b>\n"
             f"Сумма: <b>{format_price(amount)} ₽</b>\n\n"
             "Сохранить приём?",
             reply_markup=backdated_confirmation_keyboard(
                 appointment_date=selected_date,
                 clinic_id=clinic_id,
+                specialty_id=specialty_id,
                 visit_type=visit_type,
             ),
             parse_mode="HTML",
@@ -671,7 +882,7 @@ async def confirm_backdated_appointment_handler(
 
     parts = callback.data.split(":")
 
-    if len(parts) != 5:
+    if len(parts) != 6:
         await callback.answer(
             "Некорректные данные.",
             show_alert=True,
@@ -680,11 +891,13 @@ async def confirm_backdated_appointment_handler(
 
     selected_date = parse_iso_date(parts[2])
     clinic_id_text = parts[3]
-    visit_type = parts[4]
+    specialty_id_text = parts[4]
+    visit_type = parts[5]
 
     if (
         selected_date is None
         or not clinic_id_text.isdigit()
+        or not specialty_id_text.isdigit()
         or visit_type not in {"primary", "secondary"}
     ):
         await callback.answer(
@@ -694,6 +907,16 @@ async def confirm_backdated_appointment_handler(
         return
 
     clinic_id = int(clinic_id_text)
+    specialty_id = int(specialty_id_text)
+    specialty = await get_specialty_by_id(specialty_id)
+
+    if specialty is None or int(specialty[1]) != clinic_id:
+        await callback.answer(
+            "Специальность не найдена.",
+            show_alert=True,
+        )
+        return
+
     local_datetime = datetime.combine(
         selected_date,
         time(hour=12),
@@ -703,13 +926,8 @@ async def confirm_backdated_appointment_handler(
         timezone.utc
     ).isoformat(timespec="seconds")
 
-    if callback.message:
-        await callback.message.edit_reply_markup(
-            reply_markup=None
-        )
-
-    result = await add_appointment(
-        clinic_id=clinic_id,
+    result = await add_specialty_appointment(
+        specialty_id=specialty_id,
         visit_type=visit_type,
         created_at=created_at,
     )
@@ -721,19 +939,15 @@ async def confirm_backdated_appointment_handler(
         )
         return
 
-    clinic_name, amount = result
-    visit_type_name = (
-        "Первичный"
-        if visit_type == "primary"
-        else "Вторичный"
-    )
+    clinic_name, specialty_name, amount = result
 
     if callback.message:
         await callback.message.edit_text(
             "✅ <b>Приём за дату добавлен</b>\n\n"
             f"📅 Дата: {selected_date.strftime('%d.%m.%Y')}\n"
             f"🏥 {escape(clinic_name)}\n"
-            f"Тип: {visit_type_name}\n"
+            f"🩺 {escape(specialty_name)}\n"
+            f"Тип: {visit_type_title(visit_type)}\n"
             f"Сумма: {format_price(amount)} ₽",
             reply_markup=backdated_result_keyboard(
                 appointment_date=selected_date,

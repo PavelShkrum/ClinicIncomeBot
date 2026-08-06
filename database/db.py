@@ -82,6 +82,7 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS appointments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 clinic_id INTEGER NOT NULL,
+                specialty_id INTEGER,
                 visit_type TEXT NOT NULL
                     CHECK(visit_type IN ('primary', 'secondary')),
                 amount INTEGER NOT NULL CHECK(amount > 0),
@@ -90,6 +91,30 @@ async def init_db() -> None:
                     REFERENCES clinics(id)
                     ON DELETE RESTRICT
             )
+            """
+        )
+
+        appointment_columns_cursor = await database.execute(
+            "PRAGMA table_info(appointments)"
+        )
+        appointment_columns = {
+            str(row[1])
+            for row in await appointment_columns_cursor.fetchall()
+        }
+
+        if "specialty_id" not in appointment_columns:
+            await database.execute(
+                """
+                ALTER TABLE appointments
+                ADD COLUMN specialty_id INTEGER
+                    REFERENCES specialties(id)
+                """
+            )
+
+        await database.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_appointments_specialty
+            ON appointments(specialty_id)
             """
         )
 
@@ -551,6 +576,82 @@ async def rename_clinic(
 
     except sqlite3.IntegrityError:
         return "duplicate_name"
+
+
+async def add_specialty_appointment(
+    specialty_id: int,
+    visit_type: str,
+    created_at: str | None = None,
+) -> tuple[str, str, int] | None:
+    if visit_type not in {"primary", "secondary"}:
+        return None
+
+    price_column = (
+        "primary_price"
+        if visit_type == "primary"
+        else "secondary_price"
+    )
+
+    async with aiosqlite.connect(DB_PATH) as database:
+        await database.execute("PRAGMA foreign_keys = ON")
+
+        cursor = await database.execute(
+            f"""
+            SELECT
+                clinics.id,
+                clinics.name,
+                specialties.name,
+                specialties.{price_column}
+            FROM specialties
+            INNER JOIN clinics
+                ON clinics.id = specialties.clinic_id
+            WHERE specialties.id = ?
+              AND specialties.is_active = 1
+              AND clinics.is_active = 1
+            """,
+            (specialty_id,),
+        )
+
+        row = await cursor.fetchone()
+
+        if row is None:
+            return None
+
+        clinic_id = int(row[0])
+        clinic_name = str(row[1])
+        specialty_name = str(row[2])
+        amount = int(row[3])
+        appointment_created_at = (
+            created_at
+            if created_at is not None
+            else datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            )
+        )
+
+        await database.execute(
+            """
+            INSERT INTO appointments (
+                clinic_id,
+                specialty_id,
+                visit_type,
+                amount,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                clinic_id,
+                specialty_id,
+                visit_type,
+                amount,
+                appointment_created_at,
+            ),
+        )
+
+        await database.commit()
+
+    return clinic_name, specialty_name, amount
 
 
 async def add_appointment(

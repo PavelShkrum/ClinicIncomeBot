@@ -34,8 +34,48 @@ def appointment_clinics_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def appointment_specialties_keyboard(
+    clinic_id: int,
+    specialties: list[tuple[int, str, int, int]],
+) -> InlineKeyboardMarkup:
+    buttons = []
+
+    for specialty_id, name, _, _ in specialties:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"🩺 {name}",
+                    callback_data=(
+                        f"appointment:specialty:"
+                        f"{clinic_id}:{specialty_id}"
+                    ),
+                )
+            ]
+        )
+
+    buttons.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Выбрать другую поликлинику",
+                    callback_data="appointment:back",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="appointment:cancel",
+                )
+            ],
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def appointment_type_keyboard(
     clinic_id: int,
+    specialty_id: int,
     primary_price: int,
     secondary_price: int,
 ) -> InlineKeyboardMarkup:
@@ -48,25 +88,27 @@ def appointment_type_keyboard(
                         f"{format_price(primary_price)} ₽"
                     ),
                     callback_data=(
-                        f"appointment:type:{clinic_id}:primary"
+                        f"appointment:type:{clinic_id}:"
+                        f"{specialty_id}:primary"
                     ),
                 )
             ],
             [
                 InlineKeyboardButton(
                     text=(
-                        "Вторичный — "
+                        "Повторный — "
                         f"{format_price(secondary_price)} ₽"
                     ),
                     callback_data=(
-                        f"appointment:type:{clinic_id}:secondary"
+                        f"appointment:type:{clinic_id}:"
+                        f"{specialty_id}:secondary"
                     ),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="⬅️ Выбрать другую поликлинику",
-                    callback_data="appointment:back",
+                    text="⬅️ Выбрать другую специальность",
+                    callback_data=f"appointment:clinic:{clinic_id}",
                 )
             ],
             [
@@ -121,38 +163,29 @@ def backdated_clinics_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def backdated_type_keyboard(
+def backdated_specialties_keyboard(
     appointment_date: date,
     clinic_id: int,
-    primary_price: int,
-    secondary_price: int,
+    specialties: list[tuple[int, str, int, int]],
 ) -> InlineKeyboardMarkup:
     date_text = appointment_date.isoformat()
+    buttons = []
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    for specialty_id, name, _, _ in specialties:
+        buttons.append(
             [
                 InlineKeyboardButton(
-                    text=(
-                        "Первичный — "
-                        f"{format_price(primary_price)} ₽"
-                    ),
+                    text=f"🩺 {name}",
                     callback_data=(
-                        f"past:type:{date_text}:{clinic_id}:primary"
+                        f"past:specialty:{date_text}:"
+                        f"{clinic_id}:{specialty_id}"
                     ),
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=(
-                        "Вторичный — "
-                        f"{format_price(secondary_price)} ₽"
-                    ),
-                    callback_data=(
-                        f"past:type:{date_text}:{clinic_id}:secondary"
-                    ),
-                )
-            ],
+            ]
+        )
+
+    buttons.extend(
+        [
             [
                 InlineKeyboardButton(
                     text="⬅️ Другая поликлиника",
@@ -168,10 +201,66 @@ def backdated_type_keyboard(
         ]
     )
 
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def backdated_type_keyboard(
+    appointment_date: date,
+    clinic_id: int,
+    specialty_id: int,
+    primary_price: int,
+    secondary_price: int,
+) -> InlineKeyboardMarkup:
+    date_text = appointment_date.isoformat()
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=(
+                        "Первичный — "
+                        f"{format_price(primary_price)} ₽"
+                    ),
+                    callback_data=(
+                        f"past:type:{date_text}:{clinic_id}:"
+                        f"{specialty_id}:primary"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=(
+                        "Повторный — "
+                        f"{format_price(secondary_price)} ₽"
+                    ),
+                    callback_data=(
+                        f"past:type:{date_text}:{clinic_id}:"
+                        f"{specialty_id}:secondary"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Другая специальность",
+                    callback_data=(
+                        f"past:clinic:{date_text}:{clinic_id}"
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="past:cancel",
+                )
+            ],
+        ]
+    )
+
 
 def backdated_confirmation_keyboard(
     appointment_date: date,
     clinic_id: int,
+    specialty_id: int,
     visit_type: str,
 ) -> InlineKeyboardMarkup:
     date_text = appointment_date.isoformat()
@@ -182,8 +271,8 @@ def backdated_confirmation_keyboard(
                 InlineKeyboardButton(
                     text="✅ Сохранить приём",
                     callback_data=(
-                        f"past:confirm:{date_text}:"
-                        f"{clinic_id}:{visit_type}"
+                        f"past:confirm:{date_text}:{clinic_id}:"
+                        f"{specialty_id}:{visit_type}"
                     ),
                 )
             ],
@@ -191,7 +280,8 @@ def backdated_confirmation_keyboard(
                 InlineKeyboardButton(
                     text="⬅️ Изменить тип",
                     callback_data=(
-                        f"past:clinic:{date_text}:{clinic_id}"
+                        f"past:specialty:{date_text}:"
+                        f"{clinic_id}:{specialty_id}"
                     ),
                 )
             ],
