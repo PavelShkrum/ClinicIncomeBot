@@ -821,7 +821,7 @@ async def get_daily_entry_statistics(
                 specialties.id,
                 specialties.name
 
-            ORDER BY clinic_name, specialty_name, visit_type
+            ORDER BY 2, 4, 5
             """,
             (start_date, end_date, start_date, end_date),
         )

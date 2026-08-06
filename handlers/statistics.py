@@ -189,11 +189,11 @@ async def build_statistics_text(
         )
 
         if visit_type == "primary":
-            specialty_data["primary_count"] = row_count
-            specialty_data["primary_amount"] = row_total
+            specialty_data["primary_count"] += row_count
+            specialty_data["primary_amount"] += row_total
         else:
-            specialty_data["secondary_count"] = row_count
-            specialty_data["secondary_amount"] = row_total
+            specialty_data["secondary_count"] += row_count
+            specialty_data["secondary_amount"] += row_total
 
     lines = [
         title,
