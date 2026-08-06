@@ -13,7 +13,8 @@ from database.db import (
     get_specialty_by_id,
     update_specialty,
 )
-from keyboards.clinics import cancel_keyboard, clinics_menu_keyboard
+from handlers.clinics import show_clinics_overview
+from keyboards.clinics import cancel_keyboard
 from keyboards.main import get_main_keyboard
 from keyboards.specialties import (
     delete_specialty_confirmation_keyboard,
@@ -160,30 +161,11 @@ async def specialties_back_handler(
     state: FSMContext,
 ) -> None:
     await state.clear()
-    clinics = await get_clinics()
 
     if callback.message:
-        if not clinics:
-            text = (
-                "Поликлиники пока не добавлены.\n\n"
-                "Нажмите кнопку ниже, чтобы добавить первую."
-            )
-        else:
-            lines = ["🏥 <b>Поликлиники и цены</b>\n"]
-
-            for _, name, primary_price, secondary_price in clinics:
-                lines.append(
-                    f"<b>{escape(name)}</b>\n"
-                    f"Первичный: {format_price(primary_price)} ₽\n"
-                    f"Вторичный: {format_price(secondary_price)} ₽"
-                )
-
-            text = "\n\n".join(lines)
-
-        await callback.message.edit_text(
-            text,
-            reply_markup=clinics_menu_keyboard(clinics),
-            parse_mode="HTML",
+        await show_clinics_overview(
+            callback.message,
+            edit_message=True,
         )
 
     await callback.answer()

@@ -403,6 +403,92 @@ async def archive_specialty(specialty_id: int) -> bool:
     return archived
 
 
+async def add_clinic_with_specialty(
+    clinic_name: str,
+    specialty_name: str,
+    primary_price: int,
+    secondary_price: int,
+) -> str:
+    try:
+        async with aiosqlite.connect(DB_PATH) as database:
+            await database.execute("PRAGMA foreign_keys = ON")
+            await database.execute("BEGIN")
+
+            clinic_cursor = await database.execute(
+                """
+                INSERT INTO clinics (
+                    name,
+                    primary_price,
+                    secondary_price,
+                    is_active
+                )
+                VALUES (?, ?, ?, 1)
+                """,
+                (
+                    clinic_name,
+                    primary_price,
+                    secondary_price,
+                ),
+            )
+
+            clinic_id = int(clinic_cursor.lastrowid)
+
+            await database.execute(
+                """
+                INSERT INTO specialties (
+                    clinic_id,
+                    name,
+                    primary_price,
+                    secondary_price,
+                    is_active
+                )
+                VALUES (?, ?, ?, ?, 1)
+                """,
+                (
+                    clinic_id,
+                    specialty_name,
+                    primary_price,
+                    secondary_price,
+                ),
+            )
+
+            await database.commit()
+
+        return "created"
+
+    except sqlite3.IntegrityError:
+        return "duplicate_clinic"
+
+
+async def rename_clinic(
+    clinic_id: int,
+    new_name: str,
+) -> str:
+    try:
+        async with aiosqlite.connect(DB_PATH) as database:
+            cursor = await database.execute(
+                """
+                UPDATE clinics
+                SET name = ?
+                WHERE id = ?
+                  AND is_active = 1
+                """,
+                (
+                    new_name,
+                    clinic_id,
+                ),
+            )
+            await database.commit()
+
+            if cursor.rowcount == 0:
+                return "not_found"
+
+        return "updated"
+
+    except sqlite3.IntegrityError:
+        return "duplicate_name"
+
+
 async def add_appointment(
     clinic_id: int,
     visit_type: str,

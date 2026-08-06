@@ -6,10 +6,6 @@ from aiogram.types import (
 )
 
 
-KEEP_NAME_TEXT = "➡️ Оставить текущее название"
-KEEP_PRICE_TEXT = "➡️ Оставить текущую цену"
-
-
 def clinics_menu_keyboard(
     clinics: list[tuple[int, str, int, int]],
 ) -> InlineKeyboardMarkup:
@@ -33,14 +29,8 @@ def clinics_menu_keyboard(
                 ],
                 [
                     InlineKeyboardButton(
-                        text=f"✏️ Изменить всё: {name}",
-                        callback_data=f"clinic:edit:{clinic_id}",
-                    ),
-                ],
-                [
-                    InlineKeyboardButton(
-                        text=f"💰 Изменить цены: {name}",
-                        callback_data=f"clinic:prices:{clinic_id}",
+                        text=f"✏️ Изменить название: {name}",
+                        callback_data=f"clinic:rename:{clinic_id}",
                     ),
                 ],
                 [
@@ -66,46 +56,36 @@ cancel_keyboard = ReplyKeyboardMarkup(
 )
 
 
-edit_name_keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(text=KEEP_NAME_TEXT),
-        ],
-        [
-            KeyboardButton(text="❌ Отмена"),
-        ],
-    ],
-    resize_keyboard=True,
-    one_time_keyboard=True,
-)
-
-
-edit_price_keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(text=KEEP_PRICE_TEXT),
-        ],
-        [
-            KeyboardButton(text="❌ Отмена"),
-        ],
-    ],
-    resize_keyboard=True,
-    one_time_keyboard=True,
-)
-
-
-edit_clinic_confirmation_keyboard = InlineKeyboardMarkup(
+add_clinic_confirmation_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="✅ Сохранить изменения",
-                callback_data="clinic:edit:save",
+                text="✅ Сохранить поликлинику",
+                callback_data="clinic:add:save",
             ),
         ],
         [
             InlineKeyboardButton(
-                text="❌ Отменить изменение",
-                callback_data="clinic:edit:cancel",
+                text="❌ Отменить",
+                callback_data="clinic:add:cancel",
+            ),
+        ],
+    ]
+)
+
+
+rename_clinic_confirmation_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Сохранить название",
+                callback_data="clinic:rename:save",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="❌ Отменить",
+                callback_data="clinic:rename:cancel",
             ),
         ],
     ]
