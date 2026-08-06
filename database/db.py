@@ -79,6 +79,31 @@ async def init_db() -> None:
 
         await database.execute(
             """
+            CREATE TABLE IF NOT EXISTS income_adjustments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                adjustment_date TEXT NOT NULL,
+                primary_count INTEGER NOT NULL
+                    CHECK(primary_count >= 0),
+                secondary_count INTEGER NOT NULL
+                    CHECK(secondary_count >= 0),
+                amount INTEGER NOT NULL CHECK(amount >= 0),
+                note TEXT NOT NULL DEFAULT '',
+                source_key TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        await database.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+                idx_income_adjustments_date
+            ON income_adjustments(adjustment_date)
+            """
+        )
+
+        await database.execute(
+            """
             CREATE TABLE IF NOT EXISTS appointments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 clinic_id INTEGER NOT NULL,
@@ -719,6 +744,82 @@ async def add_appointment(
         await database.commit()
 
     return clinic_name, amount
+
+
+async def upsert_income_adjustment(
+    adjustment_date: str,
+    primary_count: int,
+    secondary_count: int,
+    amount: int,
+    note: str,
+    source_key: str,
+) -> None:
+    async with aiosqlite.connect(DB_PATH) as database:
+        await database.execute(
+            """
+            INSERT INTO income_adjustments (
+                adjustment_date,
+                primary_count,
+                secondary_count,
+                amount,
+                note,
+                source_key
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_key) DO UPDATE SET
+                adjustment_date = excluded.adjustment_date,
+                primary_count = excluded.primary_count,
+                secondary_count = excluded.secondary_count,
+                amount = excluded.amount,
+                note = excluded.note
+            """,
+            (
+                adjustment_date,
+                primary_count,
+                secondary_count,
+                amount,
+                note,
+                source_key,
+            ),
+        )
+        await database.commit()
+
+
+async def get_income_adjustment_statistics(
+    start_date: str,
+    end_date: str,
+) -> tuple[int, int, int, str | None, str | None]:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            SELECT
+                COALESCE(SUM(primary_count), 0),
+                COALESCE(SUM(secondary_count), 0),
+                COALESCE(SUM(amount), 0),
+                MIN(adjustment_date),
+                MAX(adjustment_date)
+            FROM income_adjustments
+            WHERE adjustment_date >= ?
+              AND adjustment_date < ?
+            """,
+            (
+                start_date,
+                end_date,
+            ),
+        )
+
+        row = await cursor.fetchone()
+
+    if row is None:
+        return 0, 0, 0, None, None
+
+    return (
+        int(row[0]),
+        int(row[1]),
+        int(row[2]),
+        str(row[3]) if row[3] is not None else None,
+        str(row[4]) if row[4] is not None else None,
+    )
 
 
 async def get_appointment_statistics(

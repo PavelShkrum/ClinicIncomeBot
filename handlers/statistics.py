@@ -5,7 +5,10 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from database.db import get_appointment_statistics
+from database.db import (
+    get_appointment_statistics,
+    get_income_adjustment_statistics,
+)
 from keyboards.main import get_main_keyboard
 from keyboards.period_calendar import period_calendar_keyboard
 from states.statistics import PeriodSelection
@@ -106,7 +109,23 @@ async def build_statistics_text(
         end_at=end_utc,
     )
 
-    if not rows:
+    (
+        adjustment_primary_count,
+        adjustment_secondary_count,
+        adjustment_amount,
+        adjustment_first_date,
+        adjustment_last_date,
+    ) = await get_income_adjustment_statistics(
+        start_date=start_local.date().isoformat(),
+        end_date=end_local.date().isoformat(),
+    )
+
+    adjustment_count = (
+        adjustment_primary_count
+        + adjustment_secondary_count
+    )
+
+    if not rows and adjustment_count == 0 and adjustment_amount == 0:
         return (
             f"{title}\n"
             f"{period_label}\n\n"
@@ -114,8 +133,8 @@ async def build_statistics_text(
         )
 
     clinics: dict[int, dict[str, object]] = {}
-    total_count = 0
-    total_amount = 0
+    total_count = adjustment_count
+    total_amount = adjustment_amount
 
     for (
         clinic_id,
@@ -173,16 +192,13 @@ async def build_statistics_text(
         title,
         period_label,
         "",
-        (
-            "💰 <b>Всего со всех поликлиник: "
-            f"{format_price(total_amount)} ₽</b>"
-        ),
+        f"💰 <b>Общая сумма: {format_price(total_amount)} ₽</b>",
         (
             f"Всего приёмов: {total_count} "
             f"{appointment_word(total_count)}"
         ),
         "",
-        "📊 <b>Разделение по специальностям</b>",
+        "📊 <b>Подробная статистика</b>",
         "",
     ]
 
@@ -242,6 +258,36 @@ async def build_statistics_text(
             )
 
         lines.append("")
+
+    if adjustment_count > 0 or adjustment_amount > 0:
+        adjustment_period = ""
+
+        if adjustment_first_date and adjustment_last_date:
+            first_date = date.fromisoformat(adjustment_first_date)
+            last_date = date.fromisoformat(adjustment_last_date)
+
+            if first_date == last_date:
+                adjustment_period = first_date.strftime("%d.%m.%Y")
+            else:
+                adjustment_period = (
+                    f"{first_date.strftime('%d.%m.%Y')}–"
+                    f"{last_date.strftime('%d.%m.%Y')}"
+                )
+
+        lines.extend(
+            [
+                "📦 <b>Архивные данные без распределения</b>",
+                adjustment_period,
+                f"Первичных: {adjustment_primary_count}",
+                f"Повторных: {adjustment_secondary_count}",
+                (
+                    "Итого: "
+                    f"{adjustment_count} "
+                    f"{appointment_word(adjustment_count)} — "
+                    f"{format_price(adjustment_amount)} ₽"
+                ),
+            ]
+        )
 
     return "\n".join(lines).rstrip()
 
