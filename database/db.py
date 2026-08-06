@@ -104,6 +104,41 @@ async def init_db() -> None:
 
         await database.execute(
             """
+            CREATE TABLE IF NOT EXISTS daily_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_date TEXT NOT NULL,
+                clinic_id INTEGER NOT NULL,
+                specialty_id INTEGER NOT NULL,
+                primary_count INTEGER NOT NULL
+                    CHECK(primary_count >= 0),
+                secondary_count INTEGER NOT NULL
+                    CHECK(secondary_count >= 0),
+                primary_amount INTEGER NOT NULL
+                    CHECK(primary_amount >= 0),
+                secondary_amount INTEGER NOT NULL
+                    CHECK(secondary_amount >= 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(work_date, clinic_id, specialty_id),
+                FOREIGN KEY (clinic_id)
+                    REFERENCES clinics(id)
+                    ON DELETE RESTRICT,
+                FOREIGN KEY (specialty_id)
+                    REFERENCES specialties(id)
+                    ON DELETE RESTRICT
+            )
+            """
+        )
+
+        await database.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_daily_entries_date
+            ON daily_entries(work_date)
+            """
+        )
+
+        await database.execute(
+            """
             CREATE TABLE IF NOT EXISTS appointments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 clinic_id INTEGER NOT NULL,
@@ -601,6 +636,242 @@ async def rename_clinic(
 
     except sqlite3.IntegrityError:
         return "duplicate_name"
+
+
+async def get_daily_entry_by_key(
+    work_date: str,
+    specialty_id: int,
+) -> tuple[int, int, int, int, int] | None:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            SELECT
+                id,
+                primary_count,
+                secondary_count,
+                primary_amount,
+                secondary_amount
+            FROM daily_entries
+            WHERE work_date = ?
+              AND specialty_id = ?
+            """,
+            (work_date, specialty_id),
+        )
+        row = await cursor.fetchone()
+
+    return row
+
+
+async def save_daily_entry(
+    work_date: str,
+    specialty_id: int,
+    primary_count: int,
+    secondary_count: int,
+) -> tuple[str, str, str, int, int, int, int] | None:
+    if primary_count < 0 or secondary_count < 0:
+        return None
+
+    if primary_count == 0 and secondary_count == 0:
+        return None
+
+    async with aiosqlite.connect(DB_PATH) as database:
+        await database.execute("PRAGMA foreign_keys = ON")
+
+        cursor = await database.execute(
+            """
+            SELECT
+                clinics.id,
+                clinics.name,
+                specialties.name,
+                specialties.primary_price,
+                specialties.secondary_price
+            FROM specialties
+            INNER JOIN clinics
+                ON clinics.id = specialties.clinic_id
+            WHERE specialties.id = ?
+              AND specialties.is_active = 1
+              AND clinics.is_active = 1
+            """,
+            (specialty_id,),
+        )
+        row = await cursor.fetchone()
+
+        if row is None:
+            return None
+
+        clinic_id = int(row[0])
+        clinic_name = str(row[1])
+        specialty_name = str(row[2])
+        primary_price = int(row[3])
+        secondary_price = int(row[4])
+        primary_amount = primary_count * primary_price
+        secondary_amount = secondary_count * secondary_price
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        existing_cursor = await database.execute(
+            """
+            SELECT id
+            FROM daily_entries
+            WHERE work_date = ?
+              AND clinic_id = ?
+              AND specialty_id = ?
+            """,
+            (work_date, clinic_id, specialty_id),
+        )
+        existing = await existing_cursor.fetchone()
+        status = "updated" if existing is not None else "created"
+
+        await database.execute(
+            """
+            INSERT INTO daily_entries (
+                work_date,
+                clinic_id,
+                specialty_id,
+                primary_count,
+                secondary_count,
+                primary_amount,
+                secondary_amount,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(work_date, clinic_id, specialty_id)
+            DO UPDATE SET
+                primary_count = excluded.primary_count,
+                secondary_count = excluded.secondary_count,
+                primary_amount = excluded.primary_amount,
+                secondary_amount = excluded.secondary_amount,
+                updated_at = excluded.updated_at
+            """,
+            (
+                work_date,
+                clinic_id,
+                specialty_id,
+                primary_count,
+                secondary_count,
+                primary_amount,
+                secondary_amount,
+                now,
+                now,
+            ),
+        )
+        await database.commit()
+
+    return (
+        status,
+        clinic_name,
+        specialty_name,
+        primary_count,
+        secondary_count,
+        primary_amount,
+        secondary_amount,
+    )
+
+
+async def get_daily_entry_statistics(
+    start_date: str,
+    end_date: str,
+) -> list[tuple[int, str, int, str, str, int, int]]:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            SELECT
+                clinics.id,
+                clinics.name,
+                specialties.id,
+                specialties.name,
+                'primary' AS visit_type,
+                SUM(daily_entries.primary_count),
+                SUM(daily_entries.primary_amount)
+            FROM daily_entries
+            INNER JOIN clinics
+                ON clinics.id = daily_entries.clinic_id
+            INNER JOIN specialties
+                ON specialties.id = daily_entries.specialty_id
+            WHERE daily_entries.work_date >= ?
+              AND daily_entries.work_date < ?
+              AND daily_entries.primary_count > 0
+            GROUP BY
+                clinics.id,
+                clinics.name,
+                specialties.id,
+                specialties.name
+
+            UNION ALL
+
+            SELECT
+                clinics.id,
+                clinics.name,
+                specialties.id,
+                specialties.name,
+                'secondary' AS visit_type,
+                SUM(daily_entries.secondary_count),
+                SUM(daily_entries.secondary_amount)
+            FROM daily_entries
+            INNER JOIN clinics
+                ON clinics.id = daily_entries.clinic_id
+            INNER JOIN specialties
+                ON specialties.id = daily_entries.specialty_id
+            WHERE daily_entries.work_date >= ?
+              AND daily_entries.work_date < ?
+              AND daily_entries.secondary_count > 0
+            GROUP BY
+                clinics.id,
+                clinics.name,
+                specialties.id,
+                specialties.name
+
+            ORDER BY clinic_name, specialty_name, visit_type
+            """,
+            (start_date, end_date, start_date, end_date),
+        )
+        rows = await cursor.fetchall()
+
+    return rows
+
+
+async def get_last_daily_entry(
+) -> tuple[int, str, str, str, int, int, int, int, str] | None:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            SELECT
+                daily_entries.id,
+                clinics.name,
+                specialties.name,
+                daily_entries.work_date,
+                daily_entries.primary_count,
+                daily_entries.secondary_count,
+                daily_entries.primary_amount,
+                daily_entries.secondary_amount,
+                daily_entries.updated_at
+            FROM daily_entries
+            INNER JOIN clinics
+                ON clinics.id = daily_entries.clinic_id
+            INNER JOIN specialties
+                ON specialties.id = daily_entries.specialty_id
+            ORDER BY daily_entries.updated_at DESC, daily_entries.id DESC
+            LIMIT 1
+            """
+        )
+        row = await cursor.fetchone()
+
+    return row
+
+
+async def delete_daily_entry(entry_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            DELETE FROM daily_entries
+            WHERE id = ?
+            """,
+            (entry_id,),
+        )
+        await database.commit()
+        deleted = cursor.rowcount > 0
+
+    return deleted
 
 
 async def add_specialty_appointment(

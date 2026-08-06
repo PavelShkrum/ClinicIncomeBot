@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message
 
 from database.db import (
     get_appointment_statistics,
+    get_daily_entry_statistics,
     get_income_adjustment_statistics,
 )
 from keyboards.main import get_main_keyboard
@@ -108,6 +109,12 @@ async def build_statistics_text(
         start_at=start_utc,
         end_at=end_utc,
     )
+
+    daily_rows = await get_daily_entry_statistics(
+        start_date=start_local.date().isoformat(),
+        end_date=end_local.date().isoformat(),
+    )
+    rows.extend(daily_rows)
 
     (
         adjustment_primary_count,
