@@ -243,6 +243,9 @@ async def update_clinic_prices(
 
 async def archive_clinic(clinic_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as database:
+        await database.execute("PRAGMA foreign_keys = ON")
+        await database.execute("BEGIN")
+
         cursor = await database.execute(
             """
             UPDATE clinics
@@ -252,11 +255,24 @@ async def archive_clinic(clinic_id: int) -> bool:
             """,
             (clinic_id,),
         )
+
+        if cursor.rowcount == 0:
+            await database.rollback()
+            return False
+
+        await database.execute(
+            """
+            UPDATE specialties
+            SET is_active = 0
+            WHERE clinic_id = ?
+              AND is_active = 1
+            """,
+            (clinic_id,),
+        )
+
         await database.commit()
 
-        archived = cursor.rowcount > 0
-
-    return archived
+    return True
 
 
 async def add_specialty(
@@ -409,29 +425,76 @@ async def add_clinic_with_specialty(
     primary_price: int,
     secondary_price: int,
 ) -> str:
-    try:
-        async with aiosqlite.connect(DB_PATH) as database:
-            await database.execute("PRAGMA foreign_keys = ON")
+    async with aiosqlite.connect(DB_PATH) as database:
+        await database.execute("PRAGMA foreign_keys = ON")
+
+        try:
             await database.execute("BEGIN")
 
-            clinic_cursor = await database.execute(
+            cursor = await database.execute(
                 """
-                INSERT INTO clinics (
-                    name,
-                    primary_price,
-                    secondary_price,
+                SELECT
+                    id,
                     is_active
-                )
-                VALUES (?, ?, ?, 1)
+                FROM clinics
+                WHERE name = ? COLLATE NOCASE
+                LIMIT 1
                 """,
-                (
-                    clinic_name,
-                    primary_price,
-                    secondary_price,
-                ),
+                (clinic_name,),
             )
+            existing_clinic = await cursor.fetchone()
 
-            clinic_id = int(clinic_cursor.lastrowid)
+            if existing_clinic is not None:
+                clinic_id = int(existing_clinic[0])
+                is_active = bool(existing_clinic[1])
+
+                if is_active:
+                    await database.rollback()
+                    return "duplicate_clinic"
+
+                await database.execute(
+                    """
+                    UPDATE clinics
+                    SET
+                        primary_price = ?,
+                        secondary_price = ?,
+                        is_active = 1
+                    WHERE id = ?
+                    """,
+                    (
+                        primary_price,
+                        secondary_price,
+                        clinic_id,
+                    ),
+                )
+
+                await database.execute(
+                    """
+                    UPDATE specialties
+                    SET is_active = 0
+                    WHERE clinic_id = ?
+                      AND is_active = 1
+                    """,
+                    (clinic_id,),
+                )
+            else:
+                clinic_cursor = await database.execute(
+                    """
+                    INSERT INTO clinics (
+                        name,
+                        primary_price,
+                        secondary_price,
+                        is_active
+                    )
+                    VALUES (?, ?, ?, 1)
+                    """,
+                    (
+                        clinic_name,
+                        primary_price,
+                        secondary_price,
+                    ),
+                )
+                clinic_id = int(clinic_cursor.lastrowid)
 
             await database.execute(
                 """
@@ -454,10 +517,11 @@ async def add_clinic_with_specialty(
 
             await database.commit()
 
-        return "created"
+        except sqlite3.IntegrityError:
+            await database.rollback()
+            return "duplicate_clinic"
 
-    except sqlite3.IntegrityError:
-        return "duplicate_clinic"
+    return "created"
 
 
 async def rename_clinic(
