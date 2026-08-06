@@ -10,6 +10,7 @@ from handlers.account import router as account_router
 from handlers.appointments import router as appointments_router
 from handlers.clinics import router as clinics_router
 from handlers.history import router as history_router
+from handlers.specialties import router as specialties_router
 from handlers.start import router as start_router
 from handlers.statistics import router as statistics_router
 from middlewares.access import AccessMiddleware, AdminOnlyMiddleware
@@ -41,9 +42,12 @@ async def main() -> None:
 
     clinics_router.message.middleware(admin_middleware)
     clinics_router.callback_query.middleware(admin_middleware)
+    specialties_router.message.middleware(admin_middleware)
+    specialties_router.callback_query.middleware(admin_middleware)
 
     dispatcher.include_router(account_router)
     dispatcher.include_router(clinics_router)
+    dispatcher.include_router(specialties_router)
     dispatcher.include_router(appointments_router)
     dispatcher.include_router(statistics_router)
     dispatcher.include_router(history_router)

@@ -45,6 +45,40 @@ async def init_db() -> None:
 
         await database.execute(
             """
+            CREATE TABLE IF NOT EXISTS specialties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                clinic_id INTEGER NOT NULL,
+                name TEXT NOT NULL COLLATE NOCASE,
+                primary_price INTEGER NOT NULL CHECK(primary_price > 0),
+                secondary_price INTEGER NOT NULL CHECK(secondary_price > 0),
+                is_active INTEGER NOT NULL DEFAULT 1
+                    CHECK(is_active IN (0, 1)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (clinic_id)
+                    REFERENCES clinics(id)
+                    ON DELETE RESTRICT
+            )
+            """
+        )
+
+        await database.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS
+                idx_specialties_active_name
+            ON specialties(clinic_id, name COLLATE NOCASE)
+            WHERE is_active = 1
+            """
+        )
+
+        await database.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_specialties_clinic
+            ON specialties(clinic_id, is_active)
+            """
+        )
+
+        await database.execute(
+            """
             CREATE TABLE IF NOT EXISTS appointments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 clinic_id INTEGER NOT NULL,
@@ -217,6 +251,150 @@ async def archive_clinic(clinic_id: int) -> bool:
               AND is_active = 1
             """,
             (clinic_id,),
+        )
+        await database.commit()
+
+        archived = cursor.rowcount > 0
+
+    return archived
+
+
+async def add_specialty(
+    clinic_id: int,
+    name: str,
+    primary_price: int,
+    secondary_price: int,
+) -> str:
+    clinic = await get_clinic_by_id(clinic_id)
+
+    if clinic is None:
+        return "clinic_not_found"
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as database:
+            await database.execute(
+                """
+                INSERT INTO specialties (
+                    clinic_id,
+                    name,
+                    primary_price,
+                    secondary_price,
+                    is_active
+                )
+                VALUES (?, ?, ?, ?, 1)
+                """,
+                (
+                    clinic_id,
+                    name,
+                    primary_price,
+                    secondary_price,
+                ),
+            )
+            await database.commit()
+
+        return "created"
+
+    except sqlite3.IntegrityError:
+        return "duplicate_name"
+
+
+async def get_specialties(
+    clinic_id: int,
+) -> list[tuple[int, str, int, int]]:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            SELECT
+                id,
+                name,
+                primary_price,
+                secondary_price
+            FROM specialties
+            WHERE clinic_id = ?
+              AND is_active = 1
+            ORDER BY name
+            """,
+            (clinic_id,),
+        )
+
+        rows = await cursor.fetchall()
+
+    return rows
+
+
+async def get_specialty_by_id(
+    specialty_id: int,
+) -> tuple[int, int, str, int, int] | None:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            SELECT
+                specialties.id,
+                specialties.clinic_id,
+                specialties.name,
+                specialties.primary_price,
+                specialties.secondary_price
+            FROM specialties
+            INNER JOIN clinics
+                ON clinics.id = specialties.clinic_id
+            WHERE specialties.id = ?
+              AND specialties.is_active = 1
+              AND clinics.is_active = 1
+            """,
+            (specialty_id,),
+        )
+
+        row = await cursor.fetchone()
+
+    return row
+
+
+async def update_specialty(
+    specialty_id: int,
+    name: str,
+    primary_price: int,
+    secondary_price: int,
+) -> str:
+    try:
+        async with aiosqlite.connect(DB_PATH) as database:
+            cursor = await database.execute(
+                """
+                UPDATE specialties
+                SET
+                    name = ?,
+                    primary_price = ?,
+                    secondary_price = ?
+                WHERE id = ?
+                  AND is_active = 1
+                """,
+                (
+                    name,
+                    primary_price,
+                    secondary_price,
+                    specialty_id,
+                ),
+            )
+            await database.commit()
+
+            if cursor.rowcount == 0:
+                return "not_found"
+
+        return "updated"
+
+    except sqlite3.IntegrityError:
+        return "duplicate_name"
+
+
+async def archive_specialty(specialty_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as database:
+        cursor = await database.execute(
+            """
+            UPDATE specialties
+            SET is_active = 0
+            WHERE id = ?
+              AND is_active = 1
+            """,
+            (specialty_id,),
         )
         await database.commit()
 

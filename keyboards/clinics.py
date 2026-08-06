@@ -27,6 +27,12 @@ def clinics_menu_keyboard(
             [
                 [
                     InlineKeyboardButton(
+                        text=f"🩺 Специальности: {name}",
+                        callback_data=f"specialty:list:{clinic_id}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
                         text=f"✏️ Изменить всё: {name}",
                         callback_data=f"clinic:edit:{clinic_id}",
                     ),
