@@ -724,27 +724,39 @@ async def add_appointment(
 async def get_appointment_statistics(
     start_at: str,
     end_at: str,
-) -> list[tuple[int, str, str, int, int]]:
+) -> list[
+    tuple[int, str, int | None, str, str, int, int]
+]:
     async with aiosqlite.connect(DB_PATH) as database:
         cursor = await database.execute(
             """
             SELECT
                 clinics.id,
                 clinics.name,
+                specialties.id,
+                COALESCE(
+                    specialties.name,
+                    'Без специальности'
+                ) AS specialty_name,
                 appointments.visit_type,
                 COUNT(appointments.id) AS appointment_count,
                 SUM(appointments.amount) AS total_amount
             FROM appointments
             INNER JOIN clinics
                 ON clinics.id = appointments.clinic_id
+            LEFT JOIN specialties
+                ON specialties.id = appointments.specialty_id
             WHERE appointments.created_at >= ?
               AND appointments.created_at < ?
             GROUP BY
                 clinics.id,
                 clinics.name,
+                specialties.id,
+                specialties.name,
                 appointments.visit_type
             ORDER BY
                 clinics.name,
+                specialty_name,
                 appointments.visit_type
             """,
             (
@@ -759,19 +771,25 @@ async def get_appointment_statistics(
 
 
 async def get_last_appointment(
-) -> tuple[int, str, str, int, str] | None:
+) -> tuple[int, str, str, str, int, str] | None:
     async with aiosqlite.connect(DB_PATH) as database:
         cursor = await database.execute(
             """
             SELECT
                 appointments.id,
                 clinics.name,
+                COALESCE(
+                    specialties.name,
+                    'Без специальности'
+                ) AS specialty_name,
                 appointments.visit_type,
                 appointments.amount,
                 appointments.created_at
             FROM appointments
             INNER JOIN clinics
                 ON clinics.id = appointments.clinic_id
+            LEFT JOIN specialties
+                ON specialties.id = appointments.specialty_id
             ORDER BY
                 appointments.created_at DESC,
                 appointments.id DESC

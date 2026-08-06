@@ -114,68 +114,142 @@ async def build_statistics_text(
         )
 
     clinics: dict[int, dict[str, object]] = {}
+    total_count = 0
+    total_amount = 0
 
     for (
         clinic_id,
         clinic_name,
+        specialty_id,
+        specialty_name,
         visit_type,
         appointment_count,
-        total_amount,
+        row_amount,
     ) in rows:
-        if clinic_id not in clinics:
-            clinics[clinic_id] = {
-                "name": clinic_name,
+        row_count = int(appointment_count)
+        row_total = int(row_amount)
+
+        total_count += row_count
+        total_amount += row_total
+
+        clinic_data = clinics.setdefault(
+            int(clinic_id),
+            {
+                "name": str(clinic_name),
+                "specialties": {},
+            },
+        )
+
+        specialties = clinic_data["specialties"]
+
+        if not isinstance(specialties, dict):
+            continue
+
+        specialty_key = (
+            int(specialty_id)
+            if specialty_id is not None
+            else -1
+        )
+
+        specialty_data = specialties.setdefault(
+            specialty_key,
+            {
+                "name": str(specialty_name),
                 "primary_count": 0,
                 "primary_amount": 0,
                 "secondary_count": 0,
                 "secondary_amount": 0,
-            }
-
-        clinic_data = clinics[clinic_id]
+            },
+        )
 
         if visit_type == "primary":
-            clinic_data["primary_count"] = int(appointment_count)
-            clinic_data["primary_amount"] = int(total_amount)
+            specialty_data["primary_count"] = row_count
+            specialty_data["primary_amount"] = row_total
         else:
-            clinic_data["secondary_count"] = int(appointment_count)
-            clinic_data["secondary_amount"] = int(total_amount)
+            specialty_data["secondary_count"] = row_count
+            specialty_data["secondary_amount"] = row_total
 
     lines = [
         title,
         period_label,
         "",
+        f"💰 <b>Общая сумма: {format_price(total_amount)} ₽</b>",
+        (
+            f"Всего: {total_count} "
+            f"{appointment_word(total_count)}"
+        ),
+        "",
+        "📊 <b>Разделение по специальностям</b>",
+        "",
     ]
-
-    total_count = 0
-    total_amount = 0
 
     for clinic_data in clinics.values():
         clinic_name = escape(str(clinic_data["name"]))
+        specialties = clinic_data["specialties"]
 
-        primary_count = int(clinic_data["primary_count"])
-        primary_amount = int(clinic_data["primary_amount"])
-        secondary_count = int(clinic_data["secondary_count"])
-        secondary_amount = int(clinic_data["secondary_amount"])
+        if not isinstance(specialties, dict):
+            continue
 
-        clinic_count = primary_count + secondary_count
-        clinic_amount = primary_amount + secondary_amount
+        clinic_count = 0
+        clinic_amount = 0
 
-        total_count += clinic_count
-        total_amount += clinic_amount
+        lines.append(f"🏥 <b>{clinic_name}</b>")
+
+        for specialty_data in specialties.values():
+            specialty_name = escape(
+                str(specialty_data["name"])
+            )
+
+            primary_count = int(
+                specialty_data["primary_count"]
+            )
+            primary_amount = int(
+                specialty_data["primary_amount"]
+            )
+            secondary_count = int(
+                specialty_data["secondary_count"]
+            )
+            secondary_amount = int(
+                specialty_data["secondary_amount"]
+            )
+
+            specialty_count = (
+                primary_count + secondary_count
+            )
+            specialty_amount = (
+                primary_amount + secondary_amount
+            )
+
+            clinic_count += specialty_count
+            clinic_amount += specialty_amount
+
+            lines.extend(
+                [
+                    "",
+                    f"🩺 <b>{specialty_name}</b>",
+                    (
+                        f"Первичных: {primary_count} — "
+                        f"{format_price(primary_amount)} ₽"
+                    ),
+                    (
+                        f"Повторных: {secondary_count} — "
+                        f"{format_price(secondary_amount)} ₽"
+                    ),
+                    (
+                        "Итого: "
+                        f"{specialty_count} "
+                        f"{appointment_word(specialty_count)} — "
+                        f"{format_price(specialty_amount)} ₽"
+                    ),
+                ]
+            )
 
         lines.extend(
             [
-                f"🏥 <b>{clinic_name}</b>",
+                "",
                 (
-                    f"Первичных: {primary_count} — "
-                    f"{format_price(primary_amount)} ₽"
-                ),
-                (
-                    f"Вторичных: {secondary_count} — "
-                    f"{format_price(secondary_amount)} ₽"
-                ),
-                (
-                    f"Итого: {clinic_count} "
+                    "<b>Всего по поликлинике:</b> "
+                    f"{clinic_count} "
                     f"{appointment_word(clinic_count)} — "
                     f"{format_price(clinic_amount)} ₽"
                 ),
@@ -183,17 +257,7 @@ async def build_statistics_text(
             ]
         )
 
-    lines.extend(
-        [
-            "💰 <b>Общий итог</b>",
-            (
-                f"{total_count} {appointment_word(total_count)} — "
-                f"{format_price(total_amount)} ₽"
-            ),
-        ]
-    )
-
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip()
 
 
 @router.message(F.text == "😺 Сегодня")

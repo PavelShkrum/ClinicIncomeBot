@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 
 from aiogram import F, Router
@@ -42,6 +42,7 @@ async def show_last_appointment_handler(
     (
         appointment_id,
         clinic_name,
+        specialty_name,
         visit_type,
         amount,
         created_at,
@@ -50,12 +51,13 @@ async def show_last_appointment_handler(
     visit_type_name = (
         "Первичный"
         if visit_type == "primary"
-        else "Вторичный"
+        else "Повторный"
     )
 
     await message.answer(
         "↩️ <b>Последний приём</b>\n\n"
         f"🏥 {escape(clinic_name)}\n"
+        f"🩺 {escape(specialty_name)}\n"
         f"Тип: {visit_type_name}\n"
         f"Сумма: {format_price(amount)} ₽\n"
         f"Дата: {format_created_at(created_at)}\n\n"
