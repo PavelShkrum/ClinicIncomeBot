@@ -173,9 +173,12 @@ async def build_statistics_text(
         title,
         period_label,
         "",
-        f"💰 <b>Общая сумма: {format_price(total_amount)} ₽</b>",
         (
-            f"Всего: {total_count} "
+            "💰 <b>Всего со всех поликлиник: "
+            f"{format_price(total_amount)} ₽</b>"
+        ),
+        (
+            f"Всего приёмов: {total_count} "
             f"{appointment_word(total_count)}"
         ),
         "",
@@ -189,9 +192,6 @@ async def build_statistics_text(
 
         if not isinstance(specialties, dict):
             continue
-
-        clinic_count = 0
-        clinic_amount = 0
 
         lines.append(f"🏥 <b>{clinic_name}</b>")
 
@@ -220,9 +220,6 @@ async def build_statistics_text(
                 primary_amount + secondary_amount
             )
 
-            clinic_count += specialty_count
-            clinic_amount += specialty_amount
-
             lines.extend(
                 [
                     "",
@@ -236,7 +233,7 @@ async def build_statistics_text(
                         f"{format_price(secondary_amount)} ₽"
                     ),
                     (
-                        "Итого: "
+                        "Итого по специальности: "
                         f"{specialty_count} "
                         f"{appointment_word(specialty_count)} — "
                         f"{format_price(specialty_amount)} ₽"
@@ -244,18 +241,7 @@ async def build_statistics_text(
                 ]
             )
 
-        lines.extend(
-            [
-                "",
-                (
-                    "<b>Всего по поликлинике:</b> "
-                    f"{clinic_count} "
-                    f"{appointment_word(clinic_count)} — "
-                    f"{format_price(clinic_amount)} ₽"
-                ),
-                "",
-            ]
-        )
+        lines.append("")
 
     return "\n".join(lines).rstrip()
 
