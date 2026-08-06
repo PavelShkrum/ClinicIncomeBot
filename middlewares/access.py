@@ -5,6 +5,17 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 
+def is_myid_command(event: TelegramObject) -> bool:
+    if not isinstance(event, Message):
+        return False
+
+    if not event.text:
+        return False
+
+    command = event.text.split(maxsplit=1)[0].lower()
+    return command in {"/myid", "/myid@clinicincomebot"}
+
+
 class AccessMiddleware(BaseMiddleware):
     def __init__(self, admin_id: int, user_id: int) -> None:
         self.admin_ids = {admin_id, user_id}
@@ -23,6 +34,9 @@ class AccessMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
+        if is_myid_command(event):
+            return await handler(event, data)
+
         if user.id not in self.admin_ids:
             if isinstance(event, CallbackQuery):
                 await event.answer(
@@ -31,13 +45,14 @@ class AccessMiddleware(BaseMiddleware):
                 )
             elif isinstance(event, Message):
                 await event.answer(
-                    "⛔ У вас нет доступа к этому боту."
+                    "⛔ У вас нет доступа к этому боту.\n\n"
+                    "Чтобы узнать свой Telegram ID, "
+                    "отправьте команду /myid."
                 )
 
             return None
 
         data["is_admin"] = True
-
         return await handler(event, data)
 
 
